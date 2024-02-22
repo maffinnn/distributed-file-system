@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 	"rpc"
+	// "encoding/gob"
 	"net"
 )
 
@@ -41,6 +42,7 @@ func main() {
 	client, _ := rpc.Dial(PORT)
 	time.Sleep(time.Second)
 	// send request & receive response
+	rpc.RegisterType(Args{})
 	var wg sync.WaitGroup
 	for i := 0; i < 5; i++ {
 		wg.Add(1)

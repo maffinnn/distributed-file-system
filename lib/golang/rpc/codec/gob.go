@@ -24,7 +24,6 @@ func (c *GobCodec) Encode(h *Header, body interface{}) ([]byte, error){
 	var m Message
 	m.Header = *h
 	m.Body = body
-
 	var buf bytes.Buffer
 	if err := gob.NewEncoder(&buf).Encode(m); err != nil {
 		log.Println("rpc codec: gob error encoding message:", err)

@@ -12,6 +12,10 @@ import (
 	"encoding/gob"
 )
 
+func RegisterType(value interface{}){
+	gob.Register(value)
+}
+
 // Call represents an active RPC.
 type Call struct {
 	Seq           uint64
@@ -210,7 +214,7 @@ func (client *Client) Go(serviceMethod string, args, reply interface{}, done cha
 	if done == nil {
 		done = make(chan *Call, 10)
 	} else if cap(done) == 0 {
-		log.Panic("rpc client: done channel is unbuffered")
+		log.Panic("rpc client:git done channel is unbuffered")
 	}
 	call := &Call{
 		ServiceMethod: serviceMethod,
@@ -218,7 +222,6 @@ func (client *Client) Go(serviceMethod string, args, reply interface{}, done cha
 		Reply:         reply,
 		Done:          done,
 	}
-	log.Printf("call reply initialized: %v", call.Reply)
 	client.send(call)
 	return call
 }

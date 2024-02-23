@@ -3,11 +3,12 @@ package rpc
 import (
 	"log"
 	"net"
-	"rpc/codec"
 	"reflect"
 	"sync"
 	"errors"
 	"strings"
+
+	"distributed-file-system/lib/golang/rpc/codec"
 )
 
 const defaultCodecType = codec.GobType

@@ -4,9 +4,9 @@ import (
 	"log"
 	"sync"
 	"time"
-	"rpc"
-	// "encoding/gob"
 	"net"
+
+	"distributed-file-system/lib/golang/rpc"
 )
 
 const PORT string = ":8080"

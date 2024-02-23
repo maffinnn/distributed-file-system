@@ -1,7 +1,6 @@
 package rpc
 
 import (
-	"rpc/codec"
 	"sync"
 	"io"
 	"errors"
@@ -10,6 +9,8 @@ import (
 	"net"
 	"bytes"
 	"encoding/gob"
+
+	"distributed-file-system/lib/golang/rpc/codec"
 )
 
 func RegisterType(value interface{}){
@@ -29,6 +30,7 @@ type Call struct {
 func (call *Call) done() {
 	call.Done <- call
 }
+
 // Client represents an RPC Client.
 // There may be multiple outstanding Calls associated
 // with a single Client, and a Client may be used by

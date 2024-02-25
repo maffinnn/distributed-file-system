@@ -5,13 +5,17 @@ import (
 	"distributed-file-system/lib/golang/service/file"
 )
 
-func init(){
+func init() {
 	rpc.RegisterType(LookUpRequest{})
 	rpc.RegisterType(LookUpResponse{})
 	rpc.RegisterType(CreateRequest{})
 	rpc.RegisterType(CreateResponse{})
 	rpc.RegisterType(ReadRequest{})
 	rpc.RegisterType(ReadResponse{})
+	rpc.RegisterType(RemoveRequest{})
+	rpc.RegisterType(RemoveResponse{})
+	rpc.RegisterType(WriteRequest{})
+	rpc.RegisterType(WriteResponse{})
 	rpc.RegisterType(struct{}{})
 }
 
@@ -20,12 +24,12 @@ type LookUpRequest struct {
 }
 
 type LookUpResponse struct {
-	Fd * file.FileDescriptor
+	Fd *file.FileDescriptor
 }
 
 type CreateRequest struct {
-	Dir	 		string
-	FileName	string
+	Dir      string
+	FileName string
 }
 
 type CreateResponse struct {
@@ -33,12 +37,32 @@ type CreateResponse struct {
 }
 
 type ReadRequest struct {
-	Dir 	 string
+	Dir      string
 	FileName string
-	Offset int64 // offset within the file
-	N int64  // number of bytes to read
+	Offset   int64 // offset within the file
+	N        int64 // number of bytes to read
 }
 
 type ReadResponse struct {
 	Content []byte
+}
+
+type RemoveRequest struct {
+	Dir      string
+	FileName string
+}
+
+type RemoveResponse struct {
+	IsRemoved bool
+}
+
+type WriteRequest struct {
+	Dir      string
+	FileName string
+	Offset   int64
+	Data     []byte
+}
+
+type WriteResponse struct {
+	N int64 // number of bytes wrote
 }

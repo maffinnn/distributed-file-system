@@ -53,7 +53,6 @@ func (server *Server) findService(serviceMethod string) (svc *service, mtype *me
 		return
 	}
 	serviceName, methodName := serviceMethod[:dot], serviceMethod[dot+1:]
-	log.Printf("rpc server service map: %v", server.serviceMap)
 	svci, ok := server.serviceMap.Load(serviceName)
 	if !ok {
 		err = errors.New("rpc server: can't find service " + serviceName)
@@ -77,7 +76,6 @@ func (server *Server) Accept(conn *net.UDPConn) {
 			log.Println("rpc server: read udp error:", err)
 			return
 		}
-		log.Printf("rpc server read %d bytes from %s", n, addr.String())
 		go server.ServeConn(conn, addr, buf[:n])
 	}
 }
@@ -147,10 +145,9 @@ func (server *Server) sendResponse(conn *net.UDPConn, addr *net.UDPAddr, h *code
 		log.Println("rpc server: encode response error:", err)
 		return
 	}
-	n, err := conn.WriteToUDP(data, addr)
+	_, err = conn.WriteToUDP(data, addr)
 	if err != nil {
 		log.Println("rpc server: write response error:", err)
 		return
 	}
-	log.Printf("rpc server: write %d bytes", n)
 }

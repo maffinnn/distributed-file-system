@@ -109,7 +109,6 @@ func (client *Client) receive() {
 		if err != nil { 
 			log.Printf("rpc client: error reading from UDP: %v", err)
 		}
-		log.Printf("rpc client: read %d bytes from server", n)
 		var m codec.Message
 		err = client.cc.Decode(buf[:n], &m)
 		if err != nil {

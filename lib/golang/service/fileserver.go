@@ -14,37 +14,63 @@ import (
 	"distributed-file-system/lib/golang/service/proto"
 )
 
-
-
 type FileServer struct {
 	addr string
 	// exported []*file.FileDescriptor
 	// accessList []*FileClient
-
 }
 
 func (fs *FileServer) LookUp(req proto.LookUpRequest, resp *proto.LookUpResponse) error {
-	log.Printf("file server LookUp is called")
-	filepath := req.Src
-	fd, err := fs.lookUp(filepath)
-	resp.Fd = fd
-	return err
-}
-
-func (fs *FileServer) lookUp(path string) (*file.FileDescriptor, error) {
+	log.Printf("FileServer.LookUp is called")
+	path := req.Src
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("file server: %s does not exist", path)
+		return fmt.Errorf("file server: %s does not exist", path)
 	}
 	fd := &file.FileDescriptor{
 		Name: filepath.Base(path),
 		Dir: filepath.Dir(path),
 	}
-	return fd, nil
+	resp.Fd = fd
+	return nil
 }
 
-// func (fs *FileServer) Create(dirfh *file.FileDescriptor, name, attr string) (newfh *FileDescriptor) {
-// 	return nil
-// }
+func (fs *FileServer) Create(req proto.CreateRequest, resp *proto.CreateResponse) error {
+	log.Printf("FileServer.Create is called")
+	path := fmt.Sprintf("%s/%s", req.Dir, req.FileName)
+	_, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("file server: %v", err)
+	}
+	resp.Fd = &file.FileDescriptor{
+		Name: filepath.Base(path),
+		Dir: filepath.Dir(path),
+	}
+	return nil
+}
+
+func (fs *FileServer) Read(req proto.ReadRequest, resp *proto.ReadResponse) error {
+	log.Printf("FileServer.Create is called")
+	path := fmt.Sprintf("%s/%s", req.Dir, req.FileName)
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("file server: %s does not exist", path)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("file server: %v", err)
+	}
+	defer f.Close()
+
+	if _, err = f.Seek(req.Offset, 0); err != nil {
+		return fmt.Errorf("file server: %v", err)
+	}
+	buf := make([]byte, req.N)
+	if _, err = f.Read(buf); err != nil {
+		return fmt.Errorf("file server: %v", err)
+	}
+	resp.Content = append(resp.Content, buf...)
+	return nil
+}
+
 
 // func (fs *FileServer) Remove(dirfh *FileDescriptor, name string) (status string) {
 // 	return ""
@@ -54,9 +80,6 @@ func (fs *FileServer) lookUp(path string) (*file.FileDescriptor, error) {
 // 	return ""
 // }
 
-// func (fs *FileServer) Read(fh *FileDescriptor, offset, n int) (attr string, data []byte) {
-// 	return "", nil
-// }
 
 // func (fs *FileServer) Write(fh *FileDescriptor, offset, n int, data []byte) (attr string) {
 // 	return ""

@@ -12,7 +12,7 @@ type Config struct {
 
 func GetConfig() *Config {
 	var config Config
-	f, err := os.ReadFile("config.yaml")
+	f, err := os.ReadFile("/Users/maffinnn/Dev/distributed-file-system/lib/golang/config/config.yaml")
     if err != nil {
         log.Fatalf("read config error %v", err)
     }

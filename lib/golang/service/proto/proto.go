@@ -6,8 +6,9 @@ import (
 )
 
 func init(){
-	rpc.Register(LookUpRequest{})
-	rpc.Register(LookUpResponse{})
+	rpc.RegisterType(LookUpRequest{})
+	rpc.RegisterType(LookUpResponse{})
+	rpc.RegisterType(struct{}{})
 }
 
 type LookUpRequest struct {
@@ -15,7 +16,7 @@ type LookUpRequest struct {
 }
 
 type LookUpResponse struct {
-	Err 	error // application level error
+	// Err 	string // application level error
 	Fd * file.FileDescriptor
 
 }

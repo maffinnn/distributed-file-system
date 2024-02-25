@@ -23,11 +23,12 @@ type FileServer struct {
 
 }
 
-func (fs *FileServer) LookUp(req proto.LookUpRequest, resp *proto.LookUpResponse) {
+func (fs *FileServer) LookUp(req proto.LookUpRequest, resp *proto.LookUpResponse) error {
+	log.Printf("file server LookUp is called")
 	filepath := req.Src
 	fd, err := fs.lookUp(filepath)
 	resp.Fd = fd
-	resp.Err = err
+	return err
 }
 
 func (fs *FileServer) lookUp(path string) (*file.FileDescriptor, error) {
@@ -95,6 +96,6 @@ func (fs *FileServer) Run() {
 	rpc.Accept(conn)
 }
 
-func (fs *FileServer) export() {
+// func (fs *FileServer) export() {
 
-}
+// }

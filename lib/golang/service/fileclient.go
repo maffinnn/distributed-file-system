@@ -4,17 +4,15 @@ import (
 	"log"
 
 	"distributed-file-system/lib/golang/rpc"
-	"distributed-file-system/lib/golang/config"
 	"distributed-file-system/lib/golang/service/proto"
 )
 
 type FileClient struct {
 }
 
-func NewFileClient(config *config.Config) *FileClient {
+func NewFileClient() *FileClient {
 	return &FileClient{}
 }
-
 
 func (fc *FileClient) Mount(serverAddr, src, target, fstype string) {
 	rpcClient, err := rpc.Dial(serverAddr)
@@ -25,9 +23,10 @@ func (fc *FileClient) Mount(serverAddr, src, target, fstype string) {
 	args := &proto.LookUpRequest{Src: src}
 	var reply proto.LookUpResponse
 	if err := rpcClient.Call("FileServer.LookUp", args, &reply); err != nil {
-		log.Fatal("call FileServer.LookUp error:", err)
+		log.Printf("call FileServer.LookUp error:", err)
+		return
 	}
-	
+	log.Printf("reply.Fd: %v", reply.Fd)
 }
 
 

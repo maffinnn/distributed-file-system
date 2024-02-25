@@ -65,10 +65,11 @@ func (s *service) registerMethods() {
 	for i := 0; i < s.typ.NumMethod(); i++ {
 		method := s.typ.Method(i)
 		mType := method.Type
-		if mType.NumIn() != 3 || mType.NumOut() != 1 {
-			continue
-		}
-		if mType.Out(0) != reflect.TypeOf((*error)(nil)).Elem() {
+		// log.Printf("mType.NumIn(): %d, mType.NumOut(): %d", mType.NumIn(), mType.NumOut())
+		// for j := 0; j < mType.NumIn(); j++ {
+		// 	log.Printf("argType: %v", mType.In(j))
+		// }
+		if mType.NumIn() != 3 || mType.NumOut() != 1 { // only 2 parameters and 1 error return value are allowed
 			continue
 		}
 		argType, replyType := mType.In(1), mType.In(2)
@@ -82,6 +83,7 @@ func (s *service) registerMethods() {
 		}
 		log.Printf("rpc server: register %s.%s\n", s.name, method.Name)
 	}
+
 }
 
 func isExportedOrBuiltinType(t reflect.Type) bool {

@@ -53,6 +53,7 @@ func (server *Server) findService(serviceMethod string) (svc *service, mtype *me
 		return
 	}
 	serviceName, methodName := serviceMethod[:dot], serviceMethod[dot+1:]
+	log.Printf("rpc server service map: %v", server.serviceMap)
 	svci, ok := server.serviceMap.Load(serviceName)
 	if !ok {
 		err = errors.New("rpc server: can't find service " + serviceName)
@@ -91,6 +92,7 @@ func (server *Server) ServeConn(conn *net.UDPConn, addr *net.UDPAddr, data []byt
 		}
 		req.h.Error = err.Error()
 		server.sendResponse(conn, addr, req.h, invalidRequest)
+		return
 	}
 	server.handleRequest(conn, addr, req)
 }

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"path/filepath"
 	"gopkg.in/yaml.v3"
 	"log"
 	"os"
@@ -8,13 +9,12 @@ import (
 
 type Config struct {
 	ServerAddr      string `yaml:"serverAddr"`
-	ServerRootLevel string
 }
 
 func GetConfig() *Config {
 	var config Config
 	pwd, _ := os.Getwd()
-	f, err := os.ReadFile(pwd + "/config/config.yaml")
+	f, err := os.ReadFile(filepath.Join(pwd, "config/config.yaml"))
 	if err != nil {
 		log.Fatalf("read config error %v", err)
 	}
@@ -22,6 +22,5 @@ func GetConfig() *Config {
 	if err != nil {
 		log.Fatalf("config unmarshal error: %v", err)
 	}
-	config.ServerRootLevel = os.Getenv("ACCESSIBLE_ROOT_PATH")
 	return &config
 }

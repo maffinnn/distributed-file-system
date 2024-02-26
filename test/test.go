@@ -2,10 +2,12 @@ package main
 
 import (
 	"bufio"
-	"distributed-file-system/lib/golang/config"
-	"distributed-file-system/lib/golang/service"
 	"log"
 	"os"
+
+	"distributed-file-system/lib/golang/config"
+	"distributed-file-system/lib/golang/service"
+	"distributed-file-system/lib/golang/service/file"
 )
 
 func run() {
@@ -25,14 +27,13 @@ func main() {
 	log.Println(pwd)
 	conf := config.GetConfig()
 	log.Println(conf)
-	server := service.NewFileServer(config.GetConfig())
+	server := file.NewFileServer(config.GetConfig())
 	go server.Run()
 
-	client := service.NewFileClient(conf)
-	client.Mount("distributed-file-system/mockdir", "testmount", "")
-	client.Read("distributed-file-system/mockdir", "pg-being_ernest.txt", 0, 250)
-	client.Create("src/distributed-file-system/mockdir", "testcreate.txt")
-	client.Write("src/distributed-file-system/mockdir", "testcreate.txt", 0, []byte("insert at front"))
-	//client.Write("src/distributed-file-system/mockdir", "testcreate.txt", 1, []byte("inserting file..."))
-	//client.Remove("src/distributed-file-system/mockdir", "testcreate.txt")
+	client := client.NewFileClient("1", conf)
+	client.Mount("distributed-file-system/mockdir1", "testmount", "")
+	client.Read("testmount/subdir1/pg-being_ernest.txt", 0, 250)
+	client.Create("testmount/testcreate1.txt")
+	client.Write("testmount/testcreate.txt", 0, []byte("insert at front on monday"))
+	client.Remove("testmount/testcreate.txt")
 }

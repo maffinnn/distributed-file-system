@@ -5,31 +5,19 @@ import (
 	"distributed-file-system/lib/golang/service/file"
 )
 
-func init() {
-	rpc.RegisterType(LookUpRequest{})
-	rpc.RegisterType(LookUpResponse{})
-	rpc.RegisterType(CreateRequest{})
-	rpc.RegisterType(CreateResponse{})
-	rpc.RegisterType(ReadRequest{})
-	rpc.RegisterType(ReadResponse{})
-	rpc.RegisterType(RemoveRequest{})
-	rpc.RegisterType(RemoveResponse{})
-	rpc.RegisterType(WriteRequest{})
-	rpc.RegisterType(WriteResponse{})
-	rpc.RegisterType(struct{}{})
+type MountRequest struct {
+	ClientId string
+	File string
+	Who  string // indicate which client is accessing
 }
 
-type LookUpRequest struct {
-	Src string
-}
-
-type LookUpResponse struct {
+type MountResponse struct {
 	Fd *file.FileDescriptor
 }
 
 type CreateRequest struct {
-	Dir      string
-	FileName string
+	ClientId string
+	FilePath string
 }
 
 type CreateResponse struct {
@@ -37,8 +25,8 @@ type CreateResponse struct {
 }
 
 type ReadRequest struct {
-	Dir      string
-	FileName string
+	ClientId string
+	FilePath	 string
 	Offset   int64 // offset within the file
 	N        int64 // number of bytes to read
 }
@@ -48,8 +36,8 @@ type ReadResponse struct {
 }
 
 type RemoveRequest struct {
-	Dir      string
-	FileName string
+	ClientId string
+	FilePath string
 }
 
 type RemoveResponse struct {
@@ -57,12 +45,27 @@ type RemoveResponse struct {
 }
 
 type WriteRequest struct {
-	Dir      string
-	FileName string
+	ClientId string
+	FilePath string
 	Offset   int64
 	Data     []byte
 }
 
 type WriteResponse struct {
 	N int64 // number of bytes wrote
+}
+
+
+func init() {
+	rpc.RegisterType(MountRequest{})
+	rpc.RegisterType(MountResponse{})
+	rpc.RegisterType(CreateRequest{})
+	rpc.RegisterType(CreateResponse{})
+	rpc.RegisterType(ReadRequest{})
+	rpc.RegisterType(ReadResponse{})
+	rpc.RegisterType(RemoveRequest{})
+	rpc.RegisterType(RemoveResponse{})
+	rpc.RegisterType(WriteRequest{})
+	rpc.RegisterType(WriteResponse{})
+	rpc.RegisterType(struct{}{})
 }

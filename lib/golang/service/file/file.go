@@ -2,26 +2,24 @@ package file
 
 import (
 	"fmt"
-	"strings"
 	"path/filepath"
+	"strings"
 )
 
 type FileDescriptor struct {
-	IsDir bool
-	FilePath string // server-side path to the file
-	Owner string // owner of the file
-	FileMode uint32 // access mode
-	Size  int64 // size of the file
-	Seeker uint64 // last seek position, only used at client side
-	Parent *FileDescriptor
-	Children []*FileDescriptor
-	subscribers map[string]bool // only used at server side
+	IsDir       bool
+	FilePath    string // server-side path to the file
+	Owner       string // owner of the file
+	FileMode    uint32 // access mode
+	Size        int64  // size of the file
+	Seeker      uint64 // last seek position, only used at client side
+	Children    []*FileDescriptor
+	Subscribers map[string]bool
 }
 
 func Print(rootpath string, fd *FileDescriptor) {
-	topLevelPrefix := fd.FilePath
-	fmt.Printf("local file:\n")
-	print(rootpath, topLevelPrefix, fd)
+	fmt.Printf("local file tree:\n")
+	print(rootpath, fd.FilePath, fd)
 }
 
 func print(rootpath, prefix string, fd *FileDescriptor) {
@@ -33,7 +31,7 @@ func print(rootpath, prefix string, fd *FileDescriptor) {
 
 // find the matching file descriptor given the root
 // the given file string must remove the server root path
-func findFd(file string, root *FileDescriptor) *FileDescriptor{
+func FindFd(file string, root *FileDescriptor) *FileDescriptor {
 	if root == nil {
 		return nil
 	}
@@ -42,7 +40,10 @@ func findFd(file string, root *FileDescriptor) *FileDescriptor{
 	}
 	var found *FileDescriptor
 	for _, cfd := range root.Children {
-		found = Find(file, cfd)
+		found = FindFd(file, cfd)
+		if found != nil {
+			return found
+		}
 	}
 	return found
 }
@@ -50,13 +51,13 @@ func findFd(file string, root *FileDescriptor) *FileDescriptor{
 func (fd *FileDescriptor) RemoveChild(child *FileDescriptor) {
 	idx := fd.FindChildIndex(child)
 	if idx != -1 {
-		fd.Children = append(fd.Children[:index], fd.Children[idx+1:]...)
+		fd.Children = append(fd.Children[:idx], fd.Children[idx+1:]...)
 	}
 }
 
 func (fd *FileDescriptor) FindChildWithFilePath(filepath string) *FileDescriptor {
-	for idx, cfd := range fd.Children {
-		if fd.FilePath == filepath {
+	for _, cfd := range fd.Children {
+		if strings.HasSuffix(cfd.FilePath, filepath) {
 			return cfd
 		}
 	}
@@ -64,8 +65,8 @@ func (fd *FileDescriptor) FindChildWithFilePath(filepath string) *FileDescriptor
 }
 
 func (fd *FileDescriptor) FindChildWithChildFd(child *FileDescriptor) *FileDescriptor {
-	for idx, cfd := range fd.Children {
-		if fd.FilePath == child.FilePath {
+	for _, cfd := range fd.Children {
+		if cfd.FilePath == child.FilePath {
 			return cfd
 		}
 	}
@@ -74,7 +75,7 @@ func (fd *FileDescriptor) FindChildWithChildFd(child *FileDescriptor) *FileDescr
 
 func (fd *FileDescriptor) FindChildIndex(child *FileDescriptor) int {
 	for idx, cfd := range fd.Children {
-		if fd.FilePath == child.FilePath {
+		if cfd.FilePath == child.FilePath {
 			return idx
 		}
 	}

@@ -1,18 +1,19 @@
 package service
 
 import (
+	"distributed-file-system/lib/golang/service/file"
+	"distributed-file-system/lib/golang/service/proto"
 	"log"
 	"os"
-	"strings"
 	"path/filepath"
+	"strings"
 
 	"distributed-file-system/lib/golang/config"
 	"distributed-file-system/lib/golang/rpc"
-	"distributed-file-system/lib/golang/service/proto"
 )
 
 type FileClient struct {
-	id 			string
+	id           string
 	rpcClient    *rpc.Client
 	mountedFiles map[string]*file.FileDescriptor // translate local file path to server side file path
 }
@@ -24,7 +25,7 @@ func NewFileClient(id string, config *config.Config) *FileClient {
 		return nil
 	}
 	return &FileClient{
-		id: 		  id,
+		id:           id,
 		rpcClient:    rpcClient,
 		mountedFiles: make(map[string]*file.FileDescriptor),
 	}
@@ -36,17 +37,16 @@ func (fc *FileClient) Run() {
 
 // TODO: check permission when client is mounting
 func (fc *FileClient) Mount(src, target, fstype string) {
-	args := &proto.MountRequest{File: src, Who: fc.id }
+	args := &proto.MountRequest{File: src, Who: fc.id}
 	var reply proto.MountResponse
 	if err := fc.rpcClient.Call("FileServer.Mount", args, &reply); err != nil {
 		log.Printf("call FileServer.Mount error: %v", err)
 		return
 	}
 	log.Printf("file client: %s is mounted at %v", src, target)
-	fc.Print(target)
 	fc.mountedFiles[target] = reply.Fd
+	fc.PrintFiles(target)
 }
-
 
 func (fc *FileClient) PrintFiles(entry string) {
 	mountPoint, err := fc.checkMountingPoint(entry)
@@ -65,6 +65,7 @@ func (fc *FileClient) Create(file string) {
 	mountPoint, err := fc.checkMountingPoint(file)
 	if err != nil {
 		log.Printf("file client: %v", err)
+		return
 	}
 	mountfd := fc.mountedFiles[mountPoint]
 	suffix := strings.TrimPrefix(file, mountPoint)
@@ -81,6 +82,7 @@ func (fc *FileClient) MkDir(dir string) {
 	mountPoint, err := fc.checkMountingPoint(dir)
 	if err != nil {
 		log.Printf("file client: %v", err)
+		return
 	}
 	mountfd := fc.mountedFiles[mountPoint]
 	suffix := strings.TrimPrefix(dir, mountPoint)
@@ -91,8 +93,7 @@ func (fc *FileClient) MkDir(dir string) {
 		return
 	}
 	fc.addToMountedFiles(reply.Fd)
-}	
-
+}
 
 func (fc *FileClient) checkMountingPoint(file string) (string, error) {
 	for mountPoint := range fc.mountedFiles {
@@ -107,6 +108,7 @@ func (fc *FileClient) Read(file string, offset, n int64) {
 	mountPoint, err := fc.checkMountingPoint(file)
 	if err != nil {
 		log.Printf("file client: %v", err)
+		return
 	}
 	fd := fc.mountedFiles[mountPoint]
 	suffix := strings.TrimPrefix(file, mountPoint)
@@ -123,6 +125,7 @@ func (fc *FileClient) Write(file string, offset int64, data []byte) {
 	mountPoint, err := fc.checkMountingPoint(file)
 	if err != nil {
 		log.Printf("file client: %v", err)
+		return
 	}
 	fd := fc.mountedFiles[mountPoint]
 	suffix := strings.TrimPrefix(file, mountPoint)
@@ -139,10 +142,11 @@ func (fc *FileClient) Remove(file string) {
 	mountPoint, err := fc.checkMountingPoint(file)
 	if err != nil {
 		log.Printf("file client: %v", err)
+		return
 	}
 	fd := fc.mountedFiles[mountPoint]
 	suffix := strings.TrimPrefix(file, mountPoint)
-	args := &proto.RemoveRequest{ FilePath: filepath.Join(fd.FilePath, suffix)}
+	args := &proto.RemoveRequest{FilePath: filepath.Join(fd.FilePath, suffix)}
 	var reply proto.RemoveResponse
 	if err := fc.rpcClient.Call("FileServer.Remove", args, &reply); err != nil {
 		log.Printf("call FileSever.Remove error: %v", err)
@@ -150,7 +154,6 @@ func (fc *FileClient) Remove(file string) {
 	}
 	log.Printf("reply: remove status %v", reply.IsRemoved)
 }
-
 
 func (fc *FileClient) addToMountedFiles(fd *file.FileDescriptor) {
 	// TODO: find the best match directory

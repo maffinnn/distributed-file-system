@@ -54,7 +54,7 @@ func (fs *FileServer) Mount(req proto.MountRequest, resp *proto.MountResponse) e
 		return fmt.Errorf("file server: %v", err)
 	}
 	rootfd := fs.trees[root]
-	fd := file.FindFd(path, rootfd)
+	fd := file.Search(rootfd, path)
 	if fd == nil {
 		return fmt.Errorf("file server: no such file") // should never happen
 	}
@@ -76,8 +76,8 @@ func (fs *FileServer) Create(req proto.CreateRequest, resp *proto.CreateResponse
 		return fmt.Errorf("file server: dir %s does not exist", parentDir)
 	}
 	rootfd := fs.trees[root]
-	parentfd := file.FindFd(parentDir, rootfd)
-	if parentfd == nil {
+	pfd := file.Search(rootfd, parentDir)
+	if pfd == nil {
 		return fmt.Errorf("file server: dir %s does not exist", parentDir)
 	}
 	// check if the file exists
@@ -94,7 +94,7 @@ func (fs *FileServer) Create(req proto.CreateRequest, resp *proto.CreateResponse
 			Subscribers: make(map[string]bool),
 		}
 		// add to tree
-		parentfd.Children = append(parentfd.Children, fd)
+		pfd.AddChild(fd)
 		resp.Fd = fd
 		return nil
 	}
@@ -117,12 +117,11 @@ func (fs *FileServer) MkDir(req proto.CreateRequest, resp *proto.CreateResponse)
 		localDir := filepath.Join(root, path)
 		// check if the directory exists
 		if _, err := os.Stat(localDir); os.IsNotExist(err) {
-			log.Printf("%s does not exists", localDir)
 			if since == -1 {
 				since = i
 			}
 			if err := os.Mkdir(localDir, os.ModePerm); err != nil {
-				return err
+				return fmt.Errorf("file server: error creating directory %s, err: %v", path, err)
 			}
 			fd := &file.FileDescriptor{
 				FilePath:    path,
@@ -131,6 +130,7 @@ func (fs *FileServer) MkDir(req proto.CreateRequest, resp *proto.CreateResponse)
 				Subscribers: make(map[string]bool),
 			}
 			fds = append(fds, fd)
+			pfd.AddChild(fd)
 			pfd = fd
 		} else {
 			//exists
@@ -144,6 +144,26 @@ func (fs *FileServer) MkDir(req proto.CreateRequest, resp *proto.CreateResponse)
 	topfd := fds[since]
 	topfd.Subscribers[req.ClientId] = true
 	resp.Fd = topfd
+	return nil
+}
+
+func (fs *FileServer) RmDir(req proto.RemoveRequest, resp *proto.RemoveResponse) error {
+	log.Printf("FileServer.RmDir is called")
+	root, _, err := fs.find(req.FilePath)
+	if err != nil {
+		return err
+	}
+	localPath := filepath.Join(root, req.FilePath)
+	if err := os.RemoveAll(localPath); err != nil{
+		resp.IsRemoved = false
+		return fmt.Errorf("file server: remove %s error: %v", req.FilePath, err)
+	}
+	// update on tree
+	rootfd := fs.trees[root]
+	pfd := file.Search(rootfd, filepath.Dir(req.FilePath))
+	pfd.UpdateAllSubscribers()
+	pfd.RemoveChild(req.FilePath)
+	resp.IsRemoved = true
 	return nil
 }
 
@@ -198,7 +218,7 @@ func (fs *FileServer) Write(req proto.WriteRequest, resp *proto.WriteResponse) e
 	if err != nil {
 		return fmt.Errorf("file server: write error %v", err)
 	}
-	fd := file.FindFd(localPath, fs.trees[root])
+	fd := file.Search(fs.trees[root], localPath)
 	fd.UpdateAllSubscribers()
 	resp.N = int64(n)
 	return nil
@@ -217,10 +237,9 @@ func (fs *FileServer) Remove(req proto.RemoveRequest, resp *proto.RemoveResponse
 	}
 	// update on tree
 	rootfd := fs.trees[root]
-	pfd := file.FindFd(filepath.Dir(req.FilePath), rootfd)
-	fd := pfd.FindChildWithFilePath(req.FilePath)
+	pfd := file.Search(rootfd, filepath.Dir(req.FilePath))
 	pfd.UpdateAllSubscribers()
-	pfd.RemoveChild(fd)
+	pfd.RemoveChild(req.FilePath)
 	resp.IsRemoved = true
 	return nil
 }

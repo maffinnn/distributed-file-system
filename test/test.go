@@ -36,5 +36,7 @@ func main() {
 	client.Create("testmount/testcreate1.txt")
 	client.Write("testmount/testcreate3.txt", 0, []byte("insert at front on monday"))
 	client.Remove("testmount/testcreate1.txt")
-	client.MkDir("testmount/subdir2/subdir1")
+	client.MakeDir("testmount/subdir2/subdir1")
+	client.MakeDir("testmount/subdir2/subdir2")
+	client.RemoveDir("testmount/subdir2/subdir1")
 }

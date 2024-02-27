@@ -4,17 +4,26 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"distributed-file-system/lib/golang/service/subscribe"
 )
 
 type FileDescriptor struct {
 	IsDir       bool
 	FilePath    string // server-side path to the file
 	Owner       string // owner of the file
-	FileMode    uint32 // access mode
-	Size        int64  // size of the file
 	Seeker      uint64 // last seek position, only used at client side
 	Children    []*FileDescriptor
-	Subscribers map[string]bool
+	Sub 		*subscribe.Subscription
+}
+
+func NewFileDescriptor(isdir bool, filepath string) *FileDescriptor {
+	return &FileDescriptor{
+		IsDir: isdir,
+		FilePath: filepath,
+		Children: make([]*FileDescriptor, 0),
+		Sub: subscribe.NewSubscription(),
+	}
 }
 
 // function to print file tree starting from root
@@ -43,14 +52,14 @@ func Search(root *FileDescriptor, file string) *FileDescriptor {
 }
 
 // remove from the tree rooted at `root`
-func Remove(root *FileDescriptor, file string) {
+func RemoveFromTree(root *FileDescriptor, file string) {
 	parent := filepath.Dir(file) // parent filepath
 	pfd := Search(root, parent) 
 	pfd.RemoveChild(file)
 }
 
 // add fd to the tree rooted at the `root`
-func Add(root *FileDescriptor, fd *FileDescriptor) {
+func AddToTree(root *FileDescriptor, fd *FileDescriptor) {
 	parent := filepath.Dir(fd.FilePath) // parent filepath
 	pfd := Search(root, parent)
 	pfd.AddChild(fd)
@@ -84,11 +93,6 @@ func (fd *FileDescriptor) FindChildIndex(file string) int {
 	}
 	return -1
 }
-
-func (fd *FileDescriptor) UpdateAllSubscribers() {
-	// TODO
-}
-
 
 
 func print(rootpath string, fd *FileDescriptor) {

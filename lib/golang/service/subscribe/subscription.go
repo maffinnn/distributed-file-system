@@ -1,19 +1,29 @@
 package subscribe
 
-import "time"
-
 type Subscription struct {
-	members map[string]*Subscriber
+	Members map[string]*Subscriber // key is the clientid
 }
 
 type Subscriber struct {
-	ClientId string
-	timeout context.Context
+	Addr string
 }
 
-
-func NewSubscriber(clientId string, timeout time.Duration) *Subscriber {
-	return &Subscriber{
-
+func NewSubscription() *Subscription {
+	return &Subscription{
+		Members: make(map[string]*Subscriber),
 	}
+}
+
+func (sub *Subscription) Subscribe(clientId, clientAddr string) {
+	sub.Members[clientId] = &Subscriber{
+		Addr: clientAddr,
+	}
+}
+
+func (sub *Subscription) Unsubscribe(clientId string) {
+	delete(sub.Members, clientId)
+}
+
+func (sub *Subscription) Publish() {
+
 }

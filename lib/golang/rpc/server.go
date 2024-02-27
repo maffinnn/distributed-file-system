@@ -24,6 +24,7 @@ func Register(rcvr interface{}) error { return DefaultServer.Register(rcvr) }
 type Server struct{
 	cc codec.Codec
 	serviceMap sync.Map
+	close 	chan struct{}
 }
 
 // NewServer returns a new Server.
@@ -31,6 +32,7 @@ func NewServer() *Server {
 	codecFunc := codec.NewCodecFuncMap[defaultCodecType]
 	return &Server{
 		cc: codecFunc(),
+		close: make(chan struct{}),
 	}
 }
 
@@ -70,13 +72,19 @@ func (server *Server) findService(serviceMethod string) (svc *service, mtype *me
 // for each incoming connection.
 func (server *Server) Accept(conn *net.UDPConn) {
 	for {
-		buf := make([]byte, 1024)
-		n, addr, err := conn.ReadFromUDP(buf)
-		if err != nil {
-			log.Println("rpc server: read udp error:", err)
+		select {
+		case <- server.close:
+			log.Printf("rpc server: closing connection...")
 			return
+		default:
+			buf := make([]byte, 1024)
+			n, addr, err := conn.ReadFromUDP(buf)
+			if err != nil {
+				log.Println("rpc server: read udp error:", err)
+				return
+			}
+			go server.ServeConn(conn, addr, buf[:n])
 		}
-		go server.ServeConn(conn, addr, buf[:n])
 	}
 }
 
@@ -93,6 +101,10 @@ func (server *Server) ServeConn(conn *net.UDPConn, addr *net.UDPAddr, data []byt
 		return
 	}
 	server.handleRequest(conn, addr, req)
+}
+
+func (server *Server) Shutdown() {
+	server.close <- struct{}{}
 }
 
 // invalidRequest is a placeholder for response argv when error occurs

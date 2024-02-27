@@ -28,9 +28,9 @@ func main() {
 	log.Println(conf)
 	server := service.NewFileServer(config.GetConfig())
 	go server.Run()
-
 	client := service.NewFileClient("1", conf)
-	client.Mount("distributed-file-system/mockdir1", "testmount", "")
+	go client.Run()
+	client.Mount("distributed-file-system/mockdir1", "testmount", 10)
 	client.Read("testmount/subdir1/pg-being_ernest.txt", 0, 250)
 	client.Create("testmount/testcreate3.txt")
 	client.Create("testmount/testcreate1.txt")

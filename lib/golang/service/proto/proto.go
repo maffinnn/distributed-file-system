@@ -6,13 +6,22 @@ import (
 )
 
 type MountRequest struct {
-	ClientId string
-	File string
-	Who  string // indicate which client is accessing
+	ClientId 	string
+	ClientAddr  string
+	FilePath 	string
 }
 
 type MountResponse struct {
 	Fd *file.FileDescriptor
+}
+
+type UnmountRequest struct {
+	ClientId string
+	FilePath string
+}
+
+type UnmountResponse struct {
+	Success bool
 }
 
 type CreateRequest struct {
@@ -55,10 +64,20 @@ type WriteResponse struct {
 	N int64 // number of bytes wrote
 }
 
+type UpdateRequest struct {
+
+}
+
+type UpdateResponse struct {
+
+}
+
 
 func init() {
 	rpc.RegisterType(MountRequest{})
 	rpc.RegisterType(MountResponse{})
+	rpc.RegisterType(UnmountRequest{})
+	rpc.RegisterType(UnmountResponse{})
 	rpc.RegisterType(CreateRequest{})
 	rpc.RegisterType(CreateResponse{})
 	rpc.RegisterType(ReadRequest{})
@@ -67,5 +86,7 @@ func init() {
 	rpc.RegisterType(RemoveResponse{})
 	rpc.RegisterType(WriteRequest{})
 	rpc.RegisterType(WriteResponse{})
+	rpc.RegisterType(UpdateRequest{})
+	rpc.RegisterType(UpdateResponse{})
 	rpc.RegisterType(struct{}{})
 }

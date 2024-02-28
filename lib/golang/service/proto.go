@@ -35,8 +35,6 @@ type CreateResponse struct {
 type ReadRequest struct {
 	ClientId string
 	FilePath	 string
-	Offset   int64 // offset within the file
-	N        int64 // number of bytes to read
 }
 
 type ReadResponse struct {
@@ -55,7 +53,6 @@ type RemoveResponse struct {
 type WriteRequest struct {
 	ClientId string
 	FilePath string
-	Offset   int64
 	Data     []byte
 }
 

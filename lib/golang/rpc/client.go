@@ -1,19 +1,19 @@
 package rpc
 
 import (
-	"sync"
-	"io"
-	"errors"
-	"log"
-	"fmt"
-	"net"
 	"bytes"
 	"encoding/gob"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"net"
+	"sync"
 
 	"distributed-file-system/lib/golang/rpc/codec"
 )
 
-func RegisterType(value interface{}){
+func RegisterType(value interface{}) {
 	gob.Register(value)
 }
 
@@ -36,7 +36,7 @@ func (call *Call) done() {
 // with a single Client, and a Client may be used by
 // multiple goroutines simultaneously.
 type Client struct {
-	conn 	*net.UDPConn
+	conn     *net.UDPConn
 	cc       codec.Codec
 	sending  sync.Mutex // protect following
 	header   codec.Header
@@ -104,9 +104,9 @@ func (client *Client) terminateCalls(err error) {
 func (client *Client) receive() {
 	var err error
 	for err == nil {
-		buf := make([]byte, 1024)
+		buf := make([]byte, 1024*50)
 		n, _, err := client.conn.ReadFromUDP(buf)
-		if err != nil { 
+		if err != nil {
 			log.Printf("rpc client: error reading from UDP: %v", err)
 		}
 		var m codec.Message
@@ -136,7 +136,7 @@ func NewClient(conn *net.UDPConn) *Client {
 	codecFunc := codec.NewCodecFuncMap[defaultCodecType]
 	client := &Client{
 		seq:     1, // seq starts with 1, 0 means invalid call
-		conn: 	conn,
+		conn:    conn,
 		cc:      codecFunc(),
 		pending: make(map[uint64]*Call),
 	}
@@ -150,7 +150,7 @@ func Dial(addr string) (*Client, error) {
 	if err != nil {
 		log.Fatal("error resolving udp address: ", err)
 	}
-	conn, err := net.DialUDP("udp",nil, s)
+	conn, err := net.DialUDP("udp", nil, s)
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +194,6 @@ func (client *Client) send(call *Call) {
 		}
 		return
 	}
-
 	_, err = client.conn.Write(data)
 	if err != nil {
 		call := client.removeCall(seq)
@@ -215,7 +214,7 @@ func (client *Client) Go(serviceMethod string, args, reply interface{}, done cha
 	if done == nil {
 		done = make(chan *Call, 10)
 	} else if cap(done) == 0 {
-		log.Panic("rpc client:git done channel is unbuffered")
+		log.Panic("rpc client: done channel is unbuffered")
 	}
 	call := &Call{
 		ServiceMethod: serviceMethod,
@@ -234,7 +233,7 @@ func (client *Client) Call(serviceMethod string, args, reply interface{}) error 
 	return call.Error
 }
 
-func deepCopy(src interface{}, dst interface{}){
+func deepCopy(src interface{}, dst interface{}) {
 	var buf bytes.Buffer
 	gob.NewEncoder(&buf).Encode(src)
 	gob.NewDecoder(bytes.NewReader(buf.Bytes())).Decode(dst)

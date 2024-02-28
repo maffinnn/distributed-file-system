@@ -1,6 +1,8 @@
 package service
 
 import (
+	"bytes"
+	"fmt"
 	"log"
 	"net"
 	"os"
@@ -14,16 +16,18 @@ import (
 
 type FileClient struct {
 	id           string
-	addr		 string
+	addr         string
 	rpcClient    *rpc.Client
-	rpcServer 	 *rpc.Server
+	rpcServer    *rpc.Server
+	simplecache  map[string]*bytes.Buffer   // local filepath to the file content
 	mountedFiles map[string]*FileDescriptor // translate local file path to server side file path
 }
 
 func NewFileClient(id, addr string, config *config.Config) *FileClient {
 	fc := &FileClient{
 		id:           id,
-		addr:		 addr,
+		addr:         addr,
+		simplecache:  make(map[string]*bytes.Buffer),
 		mountedFiles: make(map[string]*FileDescriptor),
 	}
 	fc.rpcServer = rpc.NewServer()
@@ -53,7 +57,6 @@ func (fc *FileClient) Run() {
 	fc.rpcServer.Accept(conn)
 }
 
-// TODO: check permission when client is mounting
 func (fc *FileClient) Mount(src, target string, timeout int) {
 	args := &MountRequest{FilePath: src, ClientId: fc.id, ClientAddr: fc.addr}
 	var reply MountResponse
@@ -87,14 +90,15 @@ func (fc *FileClient) Unmount(src, target string) {
 	fc.PrintAllFiles()
 }
 
-func (fc *FileClient) Create(localfilepath string) {
-	mountPoint, err := fc.checkMountingPoint(localfilepath)
+// create a file
+func (fc *FileClient) Create(localPath string) {
+	mountPoint, err := fc.checkMountingPoint(localPath)
 	if err != nil {
 		log.Printf("file client: %v", err)
 		return
 	}
 	fd := fc.mountedFiles[mountPoint]
-	suffix := strings.TrimPrefix(localfilepath, mountPoint)
+	suffix := strings.TrimPrefix(localPath, mountPoint)
 	args := &CreateRequest{FilePath: filepath.Join(fd.FilePath, suffix)}
 	var reply CreateResponse
 	if err := fc.rpcClient.Call("FileServer.Create", args, &reply); err != nil {
@@ -148,38 +152,80 @@ func (fc *FileClient) checkMountingPoint(file string) (string, error) {
 	return "", os.ErrNotExist
 }
 
-func (fc *FileClient) Read(localfilepath string, offset, n int64) {
-	mountPoint, err := fc.checkMountingPoint(localfilepath)
+// file must be a single file not a directory
+func (fc *FileClient) Read(localPath string, offset, n int) ([]byte, error) {
+	mountPoint, err := fc.checkMountingPoint(localPath)
 	if err != nil {
-		log.Printf("file client: %v", err)
-		return
+		return nil, err
 	}
-	fd := fc.mountedFiles[mountPoint]
-	suffix := strings.TrimPrefix(localfilepath, mountPoint)
-	args := &ReadRequest{FilePath: filepath.Join(fd.FilePath, suffix), Offset: offset, N: n}
-	var reply ReadResponse
-	if err := fc.rpcClient.Call("FileServer.Read", args, &reply); err != nil {
-		log.Printf("call FileServer.Read error: %v", err)
-		return
+	entryfd := fc.mountedFiles[mountPoint]
+	suffix := strings.TrimPrefix(localPath, mountPoint)
+	fd := Search(entryfd, suffix)
+	if fd.IsDir {
+		return nil, fmt.Errorf("invalid read operation, %s is a directory", localPath)
 	}
-	log.Printf("reply: %s", string(reply.Content))
+
+	// check cache
+	if _, ok := fc.simplecache[fd.FilePath]; !ok {
+		// not cached
+		args := &ReadRequest{FilePath: fd.FilePath}
+		var reply ReadResponse
+		if err := fc.rpcClient.Call("FileServer.Read", args, &reply); err != nil {
+			return nil, fmt.Errorf("call FileServer.Read error: %v", err)
+		}
+		fc.simplecache[fd.FilePath] = bytes.NewBuffer(reply.Content)
+	}
+
+	content := fc.simplecache[fd.FilePath]
+	if offset >= content.Len() {
+		return nil, fmt.Errorf("invalid read: offset exceeds the file length")
+	}
+	return fc.simplecache[fd.FilePath].Bytes()[offset:min(offset+n, content.Len())], nil
 }
 
-func (fc *FileClient) Write(localfilepath string, offset int64, data []byte) {
-	mountPoint, err := fc.checkMountingPoint(localfilepath)
+func (fc *FileClient) Write(localPath string, offset int, data []byte) (int, error) {
+	mountPoint, err := fc.checkMountingPoint(localPath)
 	if err != nil {
-		log.Printf("file client: %v", err)
-		return
+		return 0, err
 	}
-	fd := fc.mountedFiles[mountPoint]
-	suffix := strings.TrimPrefix(localfilepath, mountPoint)
-	args := &WriteRequest{FilePath: filepath.Join(fd.FilePath, suffix), Offset: offset, Data: data}
+	entryfd := fc.mountedFiles[mountPoint]
+	suffix := strings.TrimPrefix(localPath, mountPoint)
+	fd := Search(entryfd, suffix)
+	if fd.IsDir {
+		return 0, fmt.Errorf("invalid write operation, %s is a directory", localPath)
+	}
+
+	// update cached content
+	// check cache
+	if _, ok := fc.simplecache[fd.FilePath]; !ok {
+		// not cached
+		args := &ReadRequest{FilePath: fd.FilePath}
+		var reply ReadResponse
+		if err := fc.rpcClient.Call("FileServer.Read", args, &reply); err != nil {
+			return 0, fmt.Errorf("call FileServer.Read error: %v", err)
+		}
+		fc.simplecache[fd.FilePath] = bytes.NewBuffer(reply.Content)
+	}
+
+	content := fc.simplecache[fd.FilePath]
+	if offset >= content.Len() {
+		return 0, fmt.Errorf("invalid write: offset exceeds the file length")
+	}
+	copy := bytes.NewBuffer(content.Bytes())
+	content.Reset()
+	content.Write(copy.Bytes()[:offset])
+	n, err := content.Write(data)
+	if err != nil {
+		return n, err
+	}
+	content.Write(copy.Bytes()[offset:])
+	// evict cache to server
+	args := &WriteRequest{FilePath: fd.FilePath, Data: content.Bytes()}
 	var reply WriteResponse
 	if err := fc.rpcClient.Call("FileServer.Write", args, &reply); err != nil {
-		log.Printf("call FileServer.Write error: %v", err)
-		return
+		return 0, fmt.Errorf("call FileServer.Write error: %v", err)
 	}
-	log.Printf("reply: %d bytes write to the file", reply.N)
+	return n, nil
 }
 
 func (fc *FileClient) Remove(localfilepath string) {
@@ -210,9 +256,6 @@ func (fc *FileClient) Shutdown() {
 	fc.rpcServer.Shutdown()
 }
 
-
-
-//
 // utility function for display purpose
 func (fc *FileClient) PrintAllFiles() {
 	for entry, fd := range fc.mountedFiles {

@@ -1,10 +1,8 @@
 package service
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"os"
@@ -17,8 +15,8 @@ import (
 
 type FileServer struct {
 	addr              string
-	rpcServer 	  	  *rpc.Server
-	exportedRootPaths []string                        // top level directory path that the server is exporting
+	rpcServer         *rpc.Server
+	exportedRootPaths []string                   // top level directory path that the server is exporting
 	trees             map[string]*FileDescriptor // key: exported root path, value: fd, each fd must be independent of other
 }
 
@@ -57,11 +55,11 @@ func (fs *FileServer) Mount(req MountRequest, resp *MountResponse) error {
 	if fd == nil {
 		return fmt.Errorf("file server: no such file") // should never happen
 	}
-	// TODO: add subscribers
 	fd.Sub.Subscribe(req.ClientId, req.ClientAddr)
 	resp.Fd = fd
 	return nil
 }
+
 // unmount will unsubscript the requested client from the list
 func (fs *FileServer) Unmount(req UnmountRequest, resp *UnmountResponse) error {
 	log.Printf("FileServer.Unmount is called")
@@ -156,7 +154,7 @@ func (fs *FileServer) RmDir(req RemoveRequest, resp *RemoveResponse) error {
 		return err
 	}
 	localPath := filepath.Join(root, req.FilePath)
-	if err := os.RemoveAll(localPath); err != nil{
+	if err := os.RemoveAll(localPath); err != nil {
 		resp.IsRemoved = false
 		return fmt.Errorf("file server: remove %s error: %v", req.FilePath, err)
 	}
@@ -176,16 +174,14 @@ func (fs *FileServer) Read(req ReadRequest, resp *ReadResponse) error {
 		return err
 	}
 	localPath := filepath.Join(root, req.FilePath)
-	f, err := os.Open(localPath)
+	if _, err := os.Stat(localPath); os.IsNotExist(err) {
+		return fmt.Errorf("file server: open error: %v", err)
+	}
+	data, err := os.ReadFile(localPath)
 	if err != nil {
 		return fmt.Errorf("file server: open error: %v", err)
 	}
-	defer f.Close()
-	buf := make([]byte, req.N)
-	if _, err = f.ReadAt(buf, req.Offset); err != nil {
-		return fmt.Errorf("file server: %v", err)
-	}
-	resp.Content = append(resp.Content, buf...)
+	resp.Content = append(resp.Content, data...)
 	return nil
 }
 
@@ -196,33 +192,17 @@ func (fs *FileServer) Write(req WriteRequest, resp *WriteResponse) error {
 		return err
 	}
 	localPath := filepath.Join(root, req.FilePath)
-	f1, err := os.Open(localPath)
+	f, err := os.Create(localPath)
 	if err != nil {
 		return fmt.Errorf("file server: %v", err)
 	}
-	defer f1.Close()
-	if err != nil {
-		return fmt.Errorf("file server: %v", err)
-	}
-	buf1, buf2 := &bytes.Buffer{}, &bytes.Buffer{}
-	if _, err = io.Copy(buf1, f1); err != nil {
-		return fmt.Errorf("file server: %v", err)
-	}
-	buf2.Write(buf1.Bytes()[:req.Offset])
-	n, err := buf2.Write(req.Data)
-	if err != nil {
-		return fmt.Errorf("file server: write error %v", err)
-	}
-	buf2.Write(buf1.Bytes()[req.Offset:])
-	f2, _ := os.Create(localPath)
-	defer f2.Close()
-	_, err = f2.Write(buf2.Bytes())
+	defer f.Close()
+	_, err = f.Write(req.Data)
 	if err != nil {
 		return fmt.Errorf("file server: write error %v", err)
 	}
 	fd := Search(fs.trees[root], req.FilePath)
 	fd.Sub.Publish()
-	resp.N = int64(n)
 	return nil
 }
 

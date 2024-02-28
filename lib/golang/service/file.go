@@ -7,26 +7,25 @@ import (
 )
 
 type FileDescriptor struct {
-	IsDir       bool
-	FilePath    string // server-side path to the file
-	Owner       string // owner of the file
-	Seeker      uint64 // last seek position, only used at client side
-	Children    []*FileDescriptor
-	Sub 		*Subscription
+	IsDir    bool
+	FilePath string // server-side path to the file
+	Owner    string // owner of the file
+	Seeker   uint64 // last seek position, only used at client side
+	Children []*FileDescriptor
+	Sub      *Subscription
 }
 
 func NewFileDescriptor(isdir bool, filepath string) *FileDescriptor {
 	return &FileDescriptor{
-		IsDir: isdir,
+		IsDir:    isdir,
 		FilePath: filepath,
 		Children: make([]*FileDescriptor, 0),
-		Sub: NewSubscription(),
+		Sub:      NewSubscription(),
 	}
 }
 
 // function to print file tree starting from root
 func PrintTree(prefix string, root *FileDescriptor) {
-	fmt.Printf("local file tree:\n")
 	print(prefix, root)
 }
 
@@ -52,7 +51,7 @@ func Search(root *FileDescriptor, file string) *FileDescriptor {
 // remove from the tree rooted at `root`
 func RemoveFromTree(root *FileDescriptor, file string) {
 	parent := filepath.Dir(file) // parent filepath
-	pfd := Search(root, parent) 
+	pfd := Search(root, parent)
 	pfd.RemoveChild(file)
 }
 
@@ -92,10 +91,30 @@ func (fd *FileDescriptor) FindChildIndex(file string) int {
 	return -1
 }
 
-
 func print(rootpath string, fd *FileDescriptor) {
 	fmt.Printf("\t%s\n", filepath.Join(rootpath, fd.FilePath))
 	for _, cfd := range fd.Children {
 		print(rootpath, cfd)
+	}
+}
+
+// recursively performs subscription
+func Subscribe(root *FileDescriptor, clientId, clientAddr string) {
+	if root == nil {
+		return
+	}
+	root.Sub.Subscribe(clientId, clientAddr)
+	for _, cfd := range root.Children {
+		Subscribe(cfd, clientId, clientAddr)
+	}
+}
+
+func Unsubscribe(root *FileDescriptor, clientId string) {
+	if root == nil {
+		return
+	}
+	root.Sub.Unsubscribe(clientId)
+	for _, cfd := range root.Children {
+		Unsubscribe(cfd, clientId)
 	}
 }

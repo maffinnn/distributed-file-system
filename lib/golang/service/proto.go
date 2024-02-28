@@ -5,9 +5,9 @@ import (
 )
 
 type MountRequest struct {
-	ClientId 	string
-	ClientAddr  string
-	FilePath 	string
+	ClientId   string
+	ClientAddr string
+	FilePath   string
 }
 
 type MountResponse struct {
@@ -34,11 +34,11 @@ type CreateResponse struct {
 
 type ReadRequest struct {
 	ClientId string
-	FilePath	 string
+	FilePath string
 }
 
 type ReadResponse struct {
-	Content []byte
+	Data []byte
 }
 
 type RemoveRequest struct {
@@ -60,14 +60,15 @@ type WriteResponse struct {
 	N int64 // number of bytes wrote
 }
 
-type UpdateRequest struct {
-
+type UpdateFileRequest struct {
+	FilePath  string
+	IsRemoved bool
+	Data      []byte
 }
 
-type UpdateResponse struct {
-
+type UpdateFileResponse struct {
+	IsSuccess bool
 }
-
 
 func init() {
 	rpc.RegisterType(MountRequest{})
@@ -82,7 +83,7 @@ func init() {
 	rpc.RegisterType(RemoveResponse{})
 	rpc.RegisterType(WriteRequest{})
 	rpc.RegisterType(WriteResponse{})
-	rpc.RegisterType(UpdateRequest{})
-	rpc.RegisterType(UpdateResponse{})
+	rpc.RegisterType(UpdateFileRequest{})
+	rpc.RegisterType(UpdateFileResponse{})
 	rpc.RegisterType(struct{}{})
 }

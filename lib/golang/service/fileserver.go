@@ -55,7 +55,7 @@ func (fs *FileServer) Mount(req MountRequest, resp *MountResponse) error {
 	if fd == nil {
 		return fmt.Errorf("file server: no such file") // should never happen
 	}
-	fd.Sub.Subscribe(req.ClientId, req.ClientAddr)
+	Subscribe(fd, req.ClientId, req.ClientAddr)
 	resp.Fd = fd
 	return nil
 }
@@ -69,7 +69,7 @@ func (fs *FileServer) Unmount(req UnmountRequest, resp *UnmountResponse) error {
 	}
 	rootfd := fs.trees[root]
 	fd := Search(rootfd, path)
-	fd.Sub.Unsubscribe(req.ClientId)
+	Unsubscribe(fd, req.ClientId)
 	resp.Success = true
 	return nil
 }
@@ -161,7 +161,7 @@ func (fs *FileServer) RmDir(req RemoveRequest, resp *RemoveResponse) error {
 	// update on tree
 	rootfd := fs.trees[root]
 	pfd := Search(rootfd, filepath.Dir(req.FilePath))
-	pfd.Sub.Publish()
+	// pfd.Sub.Publish(DirectoryUpdateTopic, )
 	pfd.RemoveChild(req.FilePath)
 	resp.IsRemoved = true
 	return nil
@@ -181,7 +181,7 @@ func (fs *FileServer) Read(req ReadRequest, resp *ReadResponse) error {
 	if err != nil {
 		return fmt.Errorf("file server: open error: %v", err)
 	}
-	resp.Content = append(resp.Content, data...)
+	resp.Data = append(resp.Data, data...)
 	return nil
 }
 
@@ -202,7 +202,11 @@ func (fs *FileServer) Write(req WriteRequest, resp *WriteResponse) error {
 		return fmt.Errorf("file server: write error %v", err)
 	}
 	fd := Search(fs.trees[root], req.FilePath)
-	fd.Sub.Publish()
+	args := &UpdateFileRequest{
+		FilePath: req.FilePath,
+		Data:     req.Data,
+	}
+	fd.Sub.Publish(req.ClientId, FileUpdateTopic, args)
 	return nil
 }
 
@@ -220,9 +224,13 @@ func (fs *FileServer) Remove(req RemoveRequest, resp *RemoveResponse) error {
 	// update on tree
 	rootfd := fs.trees[root]
 	pfd := Search(rootfd, filepath.Dir(req.FilePath))
-	pfd.Sub.Publish()
 	pfd.RemoveChild(req.FilePath)
 	resp.IsRemoved = true
+	args := &UpdateFileRequest{
+		FilePath:  req.FilePath,
+		IsRemoved: true,
+	}
+	pfd.Sub.Publish(req.ClientId, FileUpdateTopic, args)
 	return nil
 }
 

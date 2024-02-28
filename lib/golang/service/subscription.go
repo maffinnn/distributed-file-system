@@ -1,8 +1,15 @@
 package service
 
 import (
-	"log"
 	"distributed-file-system/lib/golang/rpc"
+	"log"
+)
+
+type Topic string
+
+const (
+	FileUpdateTopic      Topic = "FileUpdate"
+	DirectoryUpdateTopic Topic = "DirectoryUpdate"
 )
 
 type Subscription struct {
@@ -10,22 +17,25 @@ type Subscription struct {
 }
 
 type Subscriber struct {
-	Id 	 string
+	Id   string
 	Addr string
 }
 
-func (s *Subscriber) Update() {
+func (s *Subscriber) UpdateFile(args interface{}) {
 	conn, err := rpc.Dial(s.Addr)
 	if err != nil {
 		log.Printf("subscriber: rpc dial error: %v", err)
 		return
 	}
-	args := &UpdateRequest{}
-	var reply UpdateResponse
-	if err := conn.Call("FileClient.Update", args, &reply); err != nil {
-		log.Printf("call FileClient.Update error: %v", err)
+	var reply UpdateFileResponse
+	if err := conn.Call("FileClient.UpdateFile", args, &reply); err != nil {
+		log.Printf("call FileClient.UpdateFile error: %v", err)
 		return
 	}
+}
+
+func (s *Subscriber) UpdateDirectory(args interface{}) {
+	// TODO:
 }
 
 func NewSubscription() *Subscription {
@@ -45,8 +55,22 @@ func (sub *Subscription) Unsubscribe(clientId string) {
 	delete(sub.Members, clientId)
 }
 
-func (sub *Subscription) Publish() {
-	for _, subscribers := range sub.Members{
-		subscribers.Update()
+// excludeId is the client to be excluded from this update
+func (sub *Subscription) Publish(excludeId string, topic Topic, args interface{}) {
+	switch topic {
+	case FileUpdateTopic:
+		for id, subscribers := range sub.Members {
+			if id == excludeId {
+				continue
+			}
+			subscribers.UpdateFile(args)
+		}
+	case DirectoryUpdateTopic:
+		for id, subscribers := range sub.Members {
+			if id == excludeId {
+				continue
+			}
+			subscribers.UpdateDirectory(args)
+		}
 	}
 }

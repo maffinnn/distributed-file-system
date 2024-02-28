@@ -1,12 +1,12 @@
 package rpc
 
 import (
+	"errors"
 	"log"
 	"net"
 	"reflect"
-	"sync"
-	"errors"
 	"strings"
+	"sync"
 
 	"distributed-file-system/lib/golang/rpc/codec"
 )
@@ -21,17 +21,17 @@ func Accept(conn *net.UDPConn) { DefaultServer.Accept(conn) }
 func Register(rcvr interface{}) error { return DefaultServer.Register(rcvr) }
 
 // Server represents an RPC Server.
-type Server struct{
-	cc codec.Codec
+type Server struct {
+	cc         codec.Codec
 	serviceMap sync.Map
-	close 	chan struct{}
+	close      chan struct{}
 }
 
 // NewServer returns a new Server.
 func NewServer() *Server {
 	codecFunc := codec.NewCodecFuncMap[defaultCodecType]
 	return &Server{
-		cc: codecFunc(),
+		cc:    codecFunc(),
 		close: make(chan struct{}),
 	}
 }
@@ -73,11 +73,11 @@ func (server *Server) findService(serviceMethod string) (svc *service, mtype *me
 func (server *Server) Accept(conn *net.UDPConn) {
 	for {
 		select {
-		case <- server.close:
+		case <-server.close:
 			log.Printf("rpc server: closing connection...")
 			return
 		default:
-			buf := make([]byte, 1024)
+			buf := make([]byte, 1024*50)
 			n, addr, err := conn.ReadFromUDP(buf)
 			if err != nil {
 				log.Println("rpc server: read udp error:", err)
@@ -110,13 +110,12 @@ func (server *Server) Shutdown() {
 // invalidRequest is a placeholder for response argv when error occurs
 var invalidRequest = struct{}{}
 
-
 // request stores all information of a call
 type request struct {
 	h            *codec.Header // header of request
 	argv, replyv reflect.Value // argv and replyv of request
-	mtype 		*methodType // type of request
-	svc 		*service
+	mtype        *methodType   // type of request
+	svc          *service
 }
 
 func (server *Server) readRequest(data []byte) (*request, error) {

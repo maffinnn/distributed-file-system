@@ -1,11 +1,9 @@
-package file
+package service
 
 import (
 	"fmt"
 	"path/filepath"
 	"strings"
-
-	"distributed-file-system/lib/golang/service/subscribe"
 )
 
 type FileDescriptor struct {
@@ -14,7 +12,7 @@ type FileDescriptor struct {
 	Owner       string // owner of the file
 	Seeker      uint64 // last seek position, only used at client side
 	Children    []*FileDescriptor
-	Sub 		*subscribe.Subscription
+	Sub 		*Subscription
 }
 
 func NewFileDescriptor(isdir bool, filepath string) *FileDescriptor {
@@ -22,12 +20,12 @@ func NewFileDescriptor(isdir bool, filepath string) *FileDescriptor {
 		IsDir: isdir,
 		FilePath: filepath,
 		Children: make([]*FileDescriptor, 0),
-		Sub: subscribe.NewSubscription(),
+		Sub: NewSubscription(),
 	}
 }
 
 // function to print file tree starting from root
-func Print(prefix string, root *FileDescriptor) {
+func PrintTree(prefix string, root *FileDescriptor) {
 	fmt.Printf("local file tree:\n")
 	print(prefix, root)
 }

@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 	"net"
-
+	"fmt"
 	"distributed-file-system/lib/golang/rpc"
 )
 
@@ -13,10 +13,18 @@ const PORT string = ":8080"
 
 type Foo int
 
+type Bar string
+
 type Args struct{ Num1, Num2 int }
 
 func (f Foo) Sum(args Args, reply *int) error {
 	*reply = args.Num1 + args.Num2
+	return nil
+}
+
+func (b Bar) Print(args Args, reply *string) error {
+	log.Printf("%v", args)
+	*reply = fmt.Sprintf("%d + %d", args.Num1, args.Num2)
 	return nil
 }
 
@@ -53,7 +61,7 @@ func main() {
 			if err := client.Call("Foo.Sum", args, &reply); err != nil {
 				log.Fatal("call Foo.Sum error:", err)
 			}
-			log.Printf("%d + %d = %d", args.Num1, args.Num2, reply)
+			log.Printf("client: %d + %d = %d", args.Num1, args.Num2, reply)
 		}(i)
 	}
 	wg.Wait()

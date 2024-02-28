@@ -13,15 +13,13 @@ import (
 
 	"distributed-file-system/lib/golang/config"
 	"distributed-file-system/lib/golang/rpc"
-	"distributed-file-system/lib/golang/service/file"
-	"distributed-file-system/lib/golang/service/proto"
 )
 
 type FileServer struct {
 	addr              string
 	rpcServer 	  	  *rpc.Server
 	exportedRootPaths []string                        // top level directory path that the server is exporting
-	trees             map[string]*file.FileDescriptor // key: exported root path, value: fd, each fd must be independent of other
+	trees             map[string]*FileDescriptor // key: exported root path, value: fd, each fd must be independent of other
 }
 
 // return the root, file path since the root, and error
@@ -47,7 +45,7 @@ func (fs *FileServer) find(file string) (string, string, error) {
 	return root, path, nil
 }
 
-func (fs *FileServer) Mount(req proto.MountRequest, resp *proto.MountResponse) error {
+func (fs *FileServer) Mount(req MountRequest, resp *MountResponse) error {
 	log.Printf("FileServer.Mount is called")
 	// every filepath is found through root + path for security
 	root, path, err := fs.find(req.FilePath)
@@ -55,7 +53,7 @@ func (fs *FileServer) Mount(req proto.MountRequest, resp *proto.MountResponse) e
 		return fmt.Errorf("file server: %v", err)
 	}
 	rootfd := fs.trees[root]
-	fd := file.Search(rootfd, path)
+	fd := Search(rootfd, path)
 	if fd == nil {
 		return fmt.Errorf("file server: no such file") // should never happen
 	}
@@ -65,20 +63,20 @@ func (fs *FileServer) Mount(req proto.MountRequest, resp *proto.MountResponse) e
 	return nil
 }
 // unmount will unsubscript the requested client from the list
-func (fs *FileServer) Unmount(req proto.UnmountRequest, resp *proto.UnmountResponse) error {
+func (fs *FileServer) Unmount(req UnmountRequest, resp *UnmountResponse) error {
 	log.Printf("FileServer.Unmount is called")
 	root, path, err := fs.find(req.FilePath)
 	if err != nil {
 		return fmt.Errorf("file server: %v", err)
 	}
 	rootfd := fs.trees[root]
-	fd := file.Search(rootfd, path)
+	fd := Search(rootfd, path)
 	fd.Sub.Unsubscribe(req.ClientId)
 	resp.Success = true
 	return nil
 }
 
-func (fs *FileServer) Create(req proto.CreateRequest, resp *proto.CreateResponse) error {
+func (fs *FileServer) Create(req CreateRequest, resp *CreateResponse) error {
 	log.Printf("FileServer.Create is called")
 	parentDir := filepath.Dir(req.FilePath)
 	root, _, err := fs.find(parentDir)
@@ -90,7 +88,7 @@ func (fs *FileServer) Create(req proto.CreateRequest, resp *proto.CreateResponse
 		return fmt.Errorf("file server: dir %s does not exist", parentDir)
 	}
 	rootfd := fs.trees[root]
-	pfd := file.Search(rootfd, parentDir)
+	pfd := Search(rootfd, parentDir)
 	if pfd == nil {
 		return fmt.Errorf("file server: dir %s does not exist", parentDir)
 	}
@@ -101,7 +99,7 @@ func (fs *FileServer) Create(req proto.CreateRequest, resp *proto.CreateResponse
 		if err != nil {
 			return fmt.Errorf("file server: create error %v", err)
 		}
-		fd := file.NewFileDescriptor(false, req.FilePath)
+		fd := NewFileDescriptor(false, req.FilePath)
 		fd.Owner = req.ClientId
 		// add to tree
 		pfd.AddChild(fd)
@@ -111,7 +109,7 @@ func (fs *FileServer) Create(req proto.CreateRequest, resp *proto.CreateResponse
 	return fmt.Errorf("file server: %s already exists", filepath.Base(req.FilePath))
 }
 
-func (fs *FileServer) MkDir(req proto.CreateRequest, resp *proto.CreateResponse) error {
+func (fs *FileServer) MkDir(req CreateRequest, resp *CreateResponse) error {
 	log.Printf("FileServer.MkDir is called")
 	req.FilePath = strings.TrimPrefix(req.FilePath, string(os.PathSeparator))
 	parts := strings.Split(req.FilePath, string(os.PathSeparator))
@@ -121,7 +119,7 @@ func (fs *FileServer) MkDir(req proto.CreateRequest, resp *proto.CreateResponse)
 	}
 	pfd := fs.trees[root]
 	since := -1
-	fds := make([]*file.FileDescriptor, 0)
+	fds := make([]*FileDescriptor, 0)
 	for i, _ := range parts {
 		path := filepath.Join(parts[:i+1]...)
 		localDir := filepath.Join(root, path)
@@ -133,7 +131,7 @@ func (fs *FileServer) MkDir(req proto.CreateRequest, resp *proto.CreateResponse)
 			if err := os.Mkdir(localDir, os.ModePerm); err != nil {
 				return fmt.Errorf("file server: error creating directory %s, err: %v", path, err)
 			}
-			fd := file.NewFileDescriptor(true, path)
+			fd := NewFileDescriptor(true, path)
 			fd.Owner = req.ClientId
 			fds = append(fds, fd)
 			pfd.AddChild(fd)
@@ -151,7 +149,7 @@ func (fs *FileServer) MkDir(req proto.CreateRequest, resp *proto.CreateResponse)
 	return nil
 }
 
-func (fs *FileServer) RmDir(req proto.RemoveRequest, resp *proto.RemoveResponse) error {
+func (fs *FileServer) RmDir(req RemoveRequest, resp *RemoveResponse) error {
 	log.Printf("FileServer.RmDir is called")
 	root, _, err := fs.find(req.FilePath)
 	if err != nil {
@@ -164,14 +162,14 @@ func (fs *FileServer) RmDir(req proto.RemoveRequest, resp *proto.RemoveResponse)
 	}
 	// update on tree
 	rootfd := fs.trees[root]
-	pfd := file.Search(rootfd, filepath.Dir(req.FilePath))
-	// pfd.Sub.Publish()
+	pfd := Search(rootfd, filepath.Dir(req.FilePath))
+	pfd.Sub.Publish()
 	pfd.RemoveChild(req.FilePath)
 	resp.IsRemoved = true
 	return nil
 }
 
-func (fs *FileServer) Read(req proto.ReadRequest, resp *proto.ReadResponse) error {
+func (fs *FileServer) Read(req ReadRequest, resp *ReadResponse) error {
 	log.Printf("FileServer.Read is called")
 	root, _, err := fs.find(req.FilePath)
 	if err != nil {
@@ -191,7 +189,7 @@ func (fs *FileServer) Read(req proto.ReadRequest, resp *proto.ReadResponse) erro
 	return nil
 }
 
-func (fs *FileServer) Write(req proto.WriteRequest, resp *proto.WriteResponse) error {
+func (fs *FileServer) Write(req WriteRequest, resp *WriteResponse) error {
 	log.Printf("FileServer.Write is called")
 	root, _, err := fs.find(req.FilePath)
 	if err != nil {
@@ -222,13 +220,13 @@ func (fs *FileServer) Write(req proto.WriteRequest, resp *proto.WriteResponse) e
 	if err != nil {
 		return fmt.Errorf("file server: write error %v", err)
 	}
-	// fd := file.Search(fs.trees[root], localPath)
-	// fd.Sub.Publish()
+	fd := Search(fs.trees[root], req.FilePath)
+	fd.Sub.Publish()
 	resp.N = int64(n)
 	return nil
 }
 
-func (fs *FileServer) Remove(req proto.RemoveRequest, resp *proto.RemoveResponse) error {
+func (fs *FileServer) Remove(req RemoveRequest, resp *RemoveResponse) error {
 	log.Printf("FileServer.Remove is called")
 	root, _, err := fs.find(req.FilePath)
 	if err != nil {
@@ -241,8 +239,8 @@ func (fs *FileServer) Remove(req proto.RemoveRequest, resp *proto.RemoveResponse
 	}
 	// update on tree
 	rootfd := fs.trees[root]
-	pfd := file.Search(rootfd, filepath.Dir(req.FilePath))
-	// pfd.Sub.Publish()
+	pfd := Search(rootfd, filepath.Dir(req.FilePath))
+	pfd.Sub.Publish()
 	pfd.RemoveChild(req.FilePath)
 	resp.IsRemoved = true
 	return nil
@@ -254,7 +252,7 @@ func NewFileServer(config *config.Config) *FileServer {
 	fs := &FileServer{
 		addr:              config.ServerAddr,
 		exportedRootPaths: paths,
-		trees:             make(map[string]*file.FileDescriptor),
+		trees:             make(map[string]*FileDescriptor),
 	}
 	for _, path := range paths {
 		fs.trees[path] = buildTree(path)
@@ -266,20 +264,20 @@ func NewFileServer(config *config.Config) *FileServer {
 	return fs
 }
 
-func buildTree(entry string) *file.FileDescriptor {
+func buildTree(entry string) *FileDescriptor {
 	if entry == "" {
 		panic("no exported directories")
 	}
 	info, _ := os.Stat(entry)
-	entryfd := file.NewFileDescriptor(info.IsDir(), "")
-	parents := make(map[string]*file.FileDescriptor)
+	entryfd := NewFileDescriptor(info.IsDir(), "")
+	parents := make(map[string]*FileDescriptor)
 	parents[entry] = entryfd
 	err := filepath.Walk(entry, func(currentPath string, info os.FileInfo, err error) error {
 		if currentPath == entry {
 			return nil
 		}
 		pfd := parents[filepath.Dir(currentPath)]
-		cfd := file.NewFileDescriptor(info.IsDir(), strings.TrimPrefix(currentPath, entry))
+		cfd := NewFileDescriptor(info.IsDir(), strings.TrimPrefix(currentPath, entry))
 		pfd.Children = append(pfd.Children, cfd)
 		if _, ok := parents[currentPath]; !ok {
 			parents[currentPath] = cfd
@@ -302,6 +300,6 @@ func (fs *FileServer) Run() {
 	if err != nil {
 		log.Fatal("network error:", err)
 	}
-	log.Println("rpc server is listening on ", conn.LocalAddr().String())
+	log.Printf("file server is listening on %s", conn.LocalAddr().String())
 	fs.rpcServer.Accept(conn)
 }

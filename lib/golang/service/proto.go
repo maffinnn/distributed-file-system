@@ -1,8 +1,7 @@
-package proto
+package service
 
 import (
 	"distributed-file-system/lib/golang/rpc"
-	"distributed-file-system/lib/golang/service/file"
 )
 
 type MountRequest struct {
@@ -12,7 +11,7 @@ type MountRequest struct {
 }
 
 type MountResponse struct {
-	Fd *file.FileDescriptor
+	Fd *FileDescriptor
 }
 
 type UnmountRequest struct {
@@ -30,7 +29,7 @@ type CreateRequest struct {
 }
 
 type CreateResponse struct {
-	Fd *file.FileDescriptor
+	Fd *FileDescriptor
 }
 
 type ReadRequest struct {

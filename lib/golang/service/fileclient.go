@@ -10,8 +10,6 @@ import (
 
 	"distributed-file-system/lib/golang/config"
 	"distributed-file-system/lib/golang/rpc"
-	"distributed-file-system/lib/golang/service/file"
-	"distributed-file-system/lib/golang/service/proto"
 )
 
 type FileClient struct {
@@ -19,17 +17,19 @@ type FileClient struct {
 	addr		 string
 	rpcClient    *rpc.Client
 	rpcServer 	 *rpc.Server
-	mountedFiles map[string]*file.FileDescriptor // translate local file path to server side file path
+	mountedFiles map[string]*FileDescriptor // translate local file path to server side file path
 }
 
-func NewFileClient(id string, config *config.Config) *FileClient {
+func NewFileClient(id, addr string, config *config.Config) *FileClient {
 	fc := &FileClient{
 		id:           id,
-		mountedFiles: make(map[string]*file.FileDescriptor),
+		addr:		 addr,
+		mountedFiles: make(map[string]*FileDescriptor),
 	}
 	fc.rpcServer = rpc.NewServer()
 	if err := fc.rpcServer.Register(fc); err != nil {
 		log.Fatal("rpc register error:", err)
+		return nil
 	}
 	rpcClient, err := rpc.Dial(config.ServerAddr)
 	if err != nil {
@@ -41,7 +41,7 @@ func NewFileClient(id string, config *config.Config) *FileClient {
 }
 
 func (fc *FileClient) Run() {
-	s, err := net.ResolveUDPAddr("udp", ":0")
+	s, err := net.ResolveUDPAddr("udp", fc.addr)
 	if err != nil {
 		log.Fatal("client error resolving udp address: ", err)
 	}
@@ -49,14 +49,14 @@ func (fc *FileClient) Run() {
 	if err != nil {
 		log.Fatal("network error:", err)
 	}
+	log.Printf("file client is listening on %s", conn.LocalAddr().String())
 	fc.rpcServer.Accept(conn)
-	log.Println("rpc client is listening on ", conn.LocalAddr().String())
 }
 
 // TODO: check permission when client is mounting
 func (fc *FileClient) Mount(src, target string, timeout int) {
-	args := &proto.MountRequest{FilePath: src, ClientId: fc.id, ClientAddr: fc.addr}
-	var reply proto.MountResponse
+	args := &MountRequest{FilePath: src, ClientId: fc.id, ClientAddr: fc.addr}
+	var reply MountResponse
 	if err := fc.rpcClient.Call("FileServer.Mount", args, &reply); err != nil {
 		log.Printf("call FileServer.Mount error: %v", err)
 		return
@@ -64,33 +64,27 @@ func (fc *FileClient) Mount(src, target string, timeout int) {
 	log.Printf("file client: %s is mounted at %v", src, target)
 	fc.mountedFiles[target] = reply.Fd
 	fc.PrintFiles(target)
-	go func() {
-		select{
-		case <-time.After(time.Duration(timeout) * time.Second):
-			args := &proto.UnmountRequest{FilePath: src, ClientId: fc.id}
-			var reply proto.UnmountResponse
-			if err := fc.rpcClient.Call("FileServer.Unmount", args, &reply); err != nil {
-				log.Printf("call FileServer.Unmount error: %v", err)
-				return
-			}
-			fc.unmount(target)
-			log.Printf("file server: timeout, unmounting files: %s", target)
-		default:
-		}
-	}()
-}
-
-func (fc *FileClient) PrintFiles(entry string) {
-	mountPoint, err := fc.checkMountingPoint(entry)
-	if err != nil {
-		log.Printf("file client: %v", err)
+	// timeout <= 0 means no timeout, the files will be mounted until client explicitly call unmount
+	if timeout > 0 {
+		go fc.monitor(src, target, timeout)
 	}
-	fd := fc.mountedFiles[mountPoint]
-	file.Print(entry, fd)
 }
 
-func (fc *FileClient) unmount(target string) {
+func (fc *FileClient) monitor(src, target string, timeout int) {
+	<-time.After(time.Duration(timeout) * time.Second)
+	fc.Unmount(src, target)
+	log.Printf("file server: timeout, unmounting files: %s", target)
+}
+
+func (fc *FileClient) Unmount(src, target string) {
+	args := &UnmountRequest{FilePath: src, ClientId: fc.id}
+	var reply UnmountResponse
+	if err := fc.rpcClient.Call("FileServer.Unmount", args, &reply); err != nil {
+		log.Printf("call FileServer.Unmount error: %v", err)
+		return
+	}
 	delete(fc.mountedFiles, target)
+	fc.PrintAllFiles()
 }
 
 func (fc *FileClient) Create(localfilepath string) {
@@ -101,13 +95,13 @@ func (fc *FileClient) Create(localfilepath string) {
 	}
 	fd := fc.mountedFiles[mountPoint]
 	suffix := strings.TrimPrefix(localfilepath, mountPoint)
-	args := &proto.CreateRequest{FilePath: filepath.Join(fd.FilePath, suffix)}
-	var reply proto.CreateResponse
+	args := &CreateRequest{FilePath: filepath.Join(fd.FilePath, suffix)}
+	var reply CreateResponse
 	if err := fc.rpcClient.Call("FileServer.Create", args, &reply); err != nil {
 		log.Printf("call FileServer.Create error: %v", err)
 		return
 	}
-	file.AddToTree(fd, reply.Fd)
+	AddToTree(fd, reply.Fd)
 }
 
 func (fc *FileClient) MakeDir(dir string) {
@@ -118,13 +112,13 @@ func (fc *FileClient) MakeDir(dir string) {
 	}
 	fd := fc.mountedFiles[mountPoint]
 	suffix := strings.TrimPrefix(dir, mountPoint)
-	args := &proto.CreateRequest{FilePath: filepath.Join(fd.FilePath, suffix)}
-	var reply proto.CreateResponse
+	args := &CreateRequest{FilePath: filepath.Join(fd.FilePath, suffix)}
+	var reply CreateResponse
 	if err := fc.rpcClient.Call("FileServer.MkDir", args, &reply); err != nil {
 		log.Printf("call FileServer.MkDir error: %v", err)
 		return
 	}
-	file.AddToTree(fd, reply.Fd)
+	AddToTree(fd, reply.Fd)
 }
 
 func (fc *FileClient) RemoveDir(dir string) {
@@ -135,14 +129,14 @@ func (fc *FileClient) RemoveDir(dir string) {
 	}
 	fd := fc.mountedFiles[mountPoint]
 	suffix := strings.TrimPrefix(dir, mountPoint)
-	args := &proto.RemoveRequest{FilePath: filepath.Join(fd.FilePath, suffix)}
-	var reply proto.RemoveResponse
+	args := &RemoveRequest{FilePath: filepath.Join(fd.FilePath, suffix)}
+	var reply RemoveResponse
 	if err := fc.rpcClient.Call("FileServer.RmDir", args, &reply); err != nil {
 		log.Printf("call FileServer.RmDir error: %v", err)
 		return
 	}
 	// remove the fd from the tree
-	file.RemoveFromTree(fd, filepath.Join(fd.FilePath, suffix))
+	RemoveFromTree(fd, filepath.Join(fd.FilePath, suffix))
 }
 
 func (fc *FileClient) checkMountingPoint(file string) (string, error) {
@@ -162,8 +156,8 @@ func (fc *FileClient) Read(localfilepath string, offset, n int64) {
 	}
 	fd := fc.mountedFiles[mountPoint]
 	suffix := strings.TrimPrefix(localfilepath, mountPoint)
-	args := &proto.ReadRequest{FilePath: filepath.Join(fd.FilePath, suffix), Offset: offset, N: n}
-	var reply proto.ReadResponse
+	args := &ReadRequest{FilePath: filepath.Join(fd.FilePath, suffix), Offset: offset, N: n}
+	var reply ReadResponse
 	if err := fc.rpcClient.Call("FileServer.Read", args, &reply); err != nil {
 		log.Printf("call FileServer.Read error: %v", err)
 		return
@@ -179,8 +173,8 @@ func (fc *FileClient) Write(localfilepath string, offset int64, data []byte) {
 	}
 	fd := fc.mountedFiles[mountPoint]
 	suffix := strings.TrimPrefix(localfilepath, mountPoint)
-	args := &proto.WriteRequest{FilePath: filepath.Join(fd.FilePath, suffix), Offset: offset, Data: data}
-	var reply proto.WriteResponse
+	args := &WriteRequest{FilePath: filepath.Join(fd.FilePath, suffix), Offset: offset, Data: data}
+	var reply WriteResponse
 	if err := fc.rpcClient.Call("FileServer.Write", args, &reply); err != nil {
 		log.Printf("call FileServer.Write error: %v", err)
 		return
@@ -196,21 +190,42 @@ func (fc *FileClient) Remove(localfilepath string) {
 	}
 	fd := fc.mountedFiles[mountPoint]
 	suffix := strings.TrimPrefix(localfilepath, mountPoint)
-	args := &proto.RemoveRequest{FilePath: filepath.Join(fd.FilePath, suffix)}
-	var reply proto.RemoveResponse
+	args := &RemoveRequest{FilePath: filepath.Join(fd.FilePath, suffix)}
+	var reply RemoveResponse
 	if err := fc.rpcClient.Call("FileServer.Remove", args, &reply); err != nil {
 		log.Printf("call FileSever.Remove error: %v", err)
 		return
 	}
 	log.Printf("reply: remove status %v", reply.IsRemoved)
-	file.RemoveFromTree(fd, filepath.Join(fd.FilePath, suffix))
+	RemoveFromTree(fd, filepath.Join(fd.FilePath, suffix))
 }
 
 // client rpc
-func (fc *FileClient) Update(req proto.UpdateRequest, resp *proto.UpdateResponse) error {
+func (fc *FileClient) Update(req UpdateRequest, resp *UpdateResponse) error {
+	log.Printf("FileClient.Update is called")
 	return nil
 }
 
 func (fc *FileClient) Shutdown() {
 	fc.rpcServer.Shutdown()
+}
+
+
+
+//
+// utility function for display purpose
+func (fc *FileClient) PrintAllFiles() {
+	for entry, fd := range fc.mountedFiles {
+		PrintTree(entry, fd)
+	}
+}
+
+func (fc *FileClient) PrintFiles(entry string) {
+	mountPoint, err := fc.checkMountingPoint(entry)
+	if err != nil {
+		log.Printf("file client: %v", err)
+		return
+	}
+	fd := fc.mountedFiles[mountPoint]
+	PrintTree(entry, fd)
 }

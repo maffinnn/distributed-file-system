@@ -4,15 +4,17 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type FileDescriptor struct {
-	IsDir    bool
-	FilePath string // server-side path to the file
-	Owner    string // owner of the file
-	Seeker   uint64 // last seek position, only used at client side
-	Children []*FileDescriptor
-	Sub      *Subscription
+	IsDir        bool
+	FilePath     string // server-side path to the file
+	Owner        string // owner of the file
+	Seeker       uint64 // last seek position, only used at client side
+	Children     []*FileDescriptor
+	sub          *Subscription
+	lastModified time.Time // last modification time at the server side
 }
 
 func NewFileDescriptor(isdir bool, filepath string) *FileDescriptor {
@@ -20,7 +22,7 @@ func NewFileDescriptor(isdir bool, filepath string) *FileDescriptor {
 		IsDir:    isdir,
 		FilePath: filepath,
 		Children: make([]*FileDescriptor, 0),
-		Sub:      NewSubscription(),
+		sub:      NewSubscription(),
 	}
 }
 
@@ -103,7 +105,7 @@ func Subscribe(root *FileDescriptor, clientId, clientAddr string) {
 	if root == nil {
 		return
 	}
-	root.Sub.Subscribe(clientId, clientAddr)
+	root.sub.Subscribe(clientId, clientAddr)
 	for _, cfd := range root.Children {
 		Subscribe(cfd, clientId, clientAddr)
 	}
@@ -113,7 +115,7 @@ func Unsubscribe(root *FileDescriptor, clientId string) {
 	if root == nil {
 		return
 	}
-	root.Sub.Unsubscribe(clientId)
+	root.sub.Unsubscribe(clientId)
 	for _, cfd := range root.Children {
 		Unsubscribe(cfd, clientId)
 	}

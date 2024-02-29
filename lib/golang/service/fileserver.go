@@ -206,7 +206,7 @@ func (fs *FileServer) Write(req WriteRequest, resp *WriteResponse) error {
 		FilePath: req.FilePath,
 		Data:     req.Data,
 	}
-	fd.Sub.Publish(req.ClientId, FileUpdateTopic, args)
+	fd.sub.Publish(req.ClientId, FileUpdateTopic, args)
 	return nil
 }
 
@@ -230,7 +230,7 @@ func (fs *FileServer) Remove(req RemoveRequest, resp *RemoveResponse) error {
 		FilePath:  req.FilePath,
 		IsRemoved: true,
 	}
-	pfd.Sub.Publish(req.ClientId, FileUpdateTopic, args)
+	pfd.sub.Publish(req.ClientId, FileUpdateTopic, args)
 	return nil
 }
 

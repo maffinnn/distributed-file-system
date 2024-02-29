@@ -11,7 +11,10 @@ import (
 	"distributed-file-system/lib/golang/rpc/codec"
 )
 
-const defaultCodecType = codec.GobType
+const (
+	defaultCodecType = codec.GobType
+	maxBufferSize    = 1024 * 50
+)
 
 // Accept accepts connections on the listener and serves requests
 // for each incoming connection.
@@ -77,7 +80,7 @@ func (server *Server) Accept(conn *net.UDPConn) {
 			log.Printf("rpc server: closing connection...")
 			return
 		default:
-			buf := make([]byte, 1024*50)
+			buf := make([]byte, maxBufferSize)
 			n, addr, err := conn.ReadFromUDP(buf)
 			if err != nil {
 				log.Println("rpc server: read udp error:", err)

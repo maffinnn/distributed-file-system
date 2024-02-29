@@ -1,11 +1,17 @@
 package rpc
 
 import (
+	"bytes"
+	"encoding/gob"
+	"go/ast"
+	"log"
 	"reflect"
 	"sync/atomic"
-	"log"
-	"go/ast"
 )
+
+func RegisterType(value interface{}) {
+	gob.Register(value)
+}
 
 type methodType struct {
 	method    reflect.Method
@@ -98,4 +104,11 @@ func (s *service) call(m *methodType, argv, replyv reflect.Value) error {
 		return errInter.(error)
 	}
 	return nil
+}
+
+// utility function for deep copying an interface
+func deepCopy(src interface{}, dst interface{}) {
+	var buf bytes.Buffer
+	gob.NewEncoder(&buf).Encode(src)
+	gob.NewDecoder(bytes.NewReader(buf.Bytes())).Decode(dst)
 }

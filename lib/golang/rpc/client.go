@@ -1,21 +1,19 @@
 package rpc
 
 import (
-	"bytes"
-	"encoding/gob"
+	"distributed-file-system/lib/golang/rpc/codec"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"math/rand/v2"
 	"net"
 	"sync"
-
-	"distributed-file-system/lib/golang/rpc/codec"
 )
 
-func RegisterType(value interface{}) {
-	gob.Register(value)
-}
+const (
+	PacketLossProbability float64 = 0.0
+)
 
 // Call represents an active RPC.
 type Call struct {
@@ -104,7 +102,7 @@ func (client *Client) terminateCalls(err error) {
 func (client *Client) receive() {
 	var err error
 	for err == nil {
-		buf := make([]byte, 1024*50)
+		buf := make([]byte, maxBufferSize)
 		n, _, err := client.conn.ReadFromUDP(buf)
 		if err != nil {
 			log.Printf("rpc client: error reading from UDP: %v", err)
@@ -194,6 +192,12 @@ func (client *Client) send(call *Call) {
 		}
 		return
 	}
+
+	// simulate packet loss
+	// rand.Float64 generates a float64 f: 0.0 <= f < 1.0
+	if rand.Float64() < PacketLossProbability {
+		return
+	}
 	_, err = client.conn.Write(data)
 	if err != nil {
 		call := client.removeCall(seq)
@@ -231,10 +235,4 @@ func (client *Client) Go(serviceMethod string, args, reply interface{}, done cha
 func (client *Client) Call(serviceMethod string, args, reply interface{}) error {
 	call := <-client.Go(serviceMethod, args, reply, make(chan *Call, 1)).Done
 	return call.Error
-}
-
-func deepCopy(src interface{}, dst interface{}) {
-	var buf bytes.Buffer
-	gob.NewEncoder(&buf).Encode(src)
-	gob.NewDecoder(bytes.NewReader(buf.Bytes())).Decode(dst)
 }

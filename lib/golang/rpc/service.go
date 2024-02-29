@@ -71,10 +71,6 @@ func (s *service) registerMethods() {
 	for i := 0; i < s.typ.NumMethod(); i++ {
 		method := s.typ.Method(i)
 		mType := method.Type
-		// log.Printf("mType.NumIn(): %d, mType.NumOut(): %d", mType.NumIn(), mType.NumOut())
-		// for j := 0; j < mType.NumIn(); j++ {
-		// 	log.Printf("argType: %v", mType.In(j))
-		// }
 		if mType.NumIn() != 3 || mType.NumOut() != 1 { // only 2 parameters and 1 error return value are allowed
 			continue
 		}

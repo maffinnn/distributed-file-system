@@ -4,8 +4,17 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-	"time"
 )
+
+type Volume struct {
+	fstype FileSystemType
+	root   *FileDescriptor // root of the volume
+	cache  *Cache
+}
+
+func NewVolume(root *FileDescriptor, fstype FileSystemType) *Volume {
+	return &Volume{root: root, fstype: fstype, cache: NewCache()}
+}
 
 type FileDescriptor struct {
 	IsDir        bool
@@ -13,8 +22,8 @@ type FileDescriptor struct {
 	Owner        string // owner of the file
 	Seeker       uint64 // last seek position, only used at client side
 	Children     []*FileDescriptor
-	sub          *Subscription
-	lastModified time.Time // last modification time at the server side
+	sub          *Subscription // list of client ids that are subscribe to this file descriptor
+	lastModified int64         // last modification time in unix time
 }
 
 func NewFileDescriptor(isdir bool, filepath string) *FileDescriptor {

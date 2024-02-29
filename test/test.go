@@ -38,8 +38,8 @@ func main() {
 	go c1.Run()
 	go c2.Run()
 	wait := make(chan struct{})
-	c1.Mount("etc/exports/mockdir1", "1", 10)
-	c2.Mount("etc/exports/mockdir1", "2", 20)
+	c1.Mount("etc/exports/mockdir1", "1", service.AndrewFileSystemType)
+	c2.Mount("etc/exports/mockdir1", "2", service.AndrewFileSystemType)
 	// data, err := c1.ReadAt("1/subdir1/pg-being_ernest.txt", 0, 100)
 	// if err != nil {
 	// 	log.Fatal(err)

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"distributed-file-system/lib/golang/config"
 	"distributed-file-system/lib/golang/rpc"
@@ -17,7 +18,7 @@ type FileServer struct {
 	addr              string
 	rpcServer         *rpc.Server
 	exportedRootPaths []string                   // top level directory path that the server is exporting
-	trees             map[string]*FileDescriptor // key: exported root path, value: fd, each fd must be independent of other
+	fileIndexTrees    map[string]*FileDescriptor // key: exported root path, value: fd, each fd must be independent of other
 }
 
 // return the root, file path since the root, and error
@@ -46,11 +47,11 @@ func (fs *FileServer) find(file string) (string, string, error) {
 func (fs *FileServer) Mount(req MountRequest, resp *MountResponse) error {
 	log.Printf("FileServer.Mount is called")
 	// every filepath is found through root + path for security
-	root, path, err := fs.find(req.FilePath)
+	rootpath, path, err := fs.find(req.FilePath)
 	if err != nil {
 		return fmt.Errorf("file server: %v", err)
 	}
-	rootfd := fs.trees[root]
+	rootfd := fs.fileIndexTrees[rootpath]
 	fd := Search(rootfd, path)
 	if fd == nil {
 		return fmt.Errorf("file server: no such file") // should never happen
@@ -60,17 +61,29 @@ func (fs *FileServer) Mount(req MountRequest, resp *MountResponse) error {
 	return nil
 }
 
-// unmount will unsubscript the requested client from the list
+// unmount will unsubscribe the requested client from the list
 func (fs *FileServer) Unmount(req UnmountRequest, resp *UnmountResponse) error {
 	log.Printf("FileServer.Unmount is called")
 	root, path, err := fs.find(req.FilePath)
 	if err != nil {
 		return fmt.Errorf("file server: %v", err)
 	}
-	rootfd := fs.trees[root]
+	rootfd := fs.fileIndexTrees[root]
 	fd := Search(rootfd, path)
 	Unsubscribe(fd, req.ClientId)
 	resp.Success = true
+	return nil
+}
+
+func (fs *FileServer) GetAttribute(req GetAttributeRequest, resp *GetAttributeResponse) error {
+	log.Printf("FileServer.GetAttribute is called")
+	root, path, err := fs.find(req.FilePath)
+	if err != nil {
+		return fmt.Errorf("file server: %v", err)
+	}
+	rootfd := fs.fileIndexTrees[root]
+	fd := Search(rootfd, path)
+	resp.Fd = fd
 	return nil
 }
 
@@ -85,7 +98,7 @@ func (fs *FileServer) Create(req CreateRequest, resp *CreateResponse) error {
 	if _, err := os.Stat(filepath.Join(root, parentDir)); errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("file server: dir %s does not exist", parentDir)
 	}
-	rootfd := fs.trees[root]
+	rootfd := fs.fileIndexTrees[root]
 	pfd := Search(rootfd, parentDir)
 	if pfd == nil {
 		return fmt.Errorf("file server: dir %s does not exist", parentDir)
@@ -98,6 +111,7 @@ func (fs *FileServer) Create(req CreateRequest, resp *CreateResponse) error {
 			return fmt.Errorf("file server: create error %v", err)
 		}
 		fd := NewFileDescriptor(false, req.FilePath)
+		fd.lastModified = time.Now().Unix()
 		fd.Owner = req.ClientId
 		// add to tree
 		pfd.AddChild(fd)
@@ -107,65 +121,77 @@ func (fs *FileServer) Create(req CreateRequest, resp *CreateResponse) error {
 	return fmt.Errorf("file server: %s already exists", filepath.Base(req.FilePath))
 }
 
-func (fs *FileServer) MkDir(req CreateRequest, resp *CreateResponse) error {
-	log.Printf("FileServer.MkDir is called")
-	req.FilePath = strings.TrimPrefix(req.FilePath, string(os.PathSeparator))
-	parts := strings.Split(req.FilePath, string(os.PathSeparator))
-	root, _, err := fs.find(parts[0])
-	if err != nil {
-		return err
-	}
-	pfd := fs.trees[root]
-	since := -1
-	fds := make([]*FileDescriptor, 0)
-	for i, _ := range parts {
-		path := filepath.Join(parts[:i+1]...)
-		localDir := filepath.Join(root, path)
-		// check if the directory exists
-		if _, err := os.Stat(localDir); os.IsNotExist(err) {
-			if since == -1 {
-				since = i
-			}
-			if err := os.Mkdir(localDir, os.ModePerm); err != nil {
-				return fmt.Errorf("file server: error creating directory %s, err: %v", path, err)
-			}
-			fd := NewFileDescriptor(true, path)
-			fd.Owner = req.ClientId
-			fds = append(fds, fd)
-			pfd.AddChild(fd)
-			pfd = fd
-		} else {
-			//exists
-			pfd = pfd.FindChildWithFilePath(path)
-			fds = append(fds, pfd)
-		}
-	}
-	if since == -1 {
-		return fmt.Errorf("file server: dir: %s exists", req.FilePath)
-	}
-	resp.Fd = fds[since]
-	return nil
-}
+// func (fs *FileServer) MkDir(req CreateRequest, resp *CreateResponse) error {
+// 	log.Printf("FileServer.MkDir is called")
+// 	req.FilePath = strings.TrimPrefix(req.FilePath, string(os.PathSeparator))
+// 	parts := strings.Split(req.FilePath, string(os.PathSeparator))
+// 	root, _, err := fs.find(parts[0])
+// 	if err != nil {
+// 		return err
+// 	}
+// 	pfd := fs.fileIndexTrees[root]
+// 	since := -1
+// 	fds := make([]*FileDescriptor, 0)
+// 	for i, _ := range parts {
+// 		path := filepath.Join(parts[:i+1]...)
+// 		localDir := filepath.Join(root, path)
+// 		// check if the directory exists
+// 		if _, err := os.Stat(localDir); os.IsNotExist(err) {
+// 			if since == -1 {
+// 				since = i
+// 			}
+// 			if err := os.Mkdir(localDir, os.ModePerm); err != nil {
+// 				return fmt.Errorf("file server: error creating directory %s, err: %v", path, err)
+// 			}
+// 			fd := NewFileDescriptor(true, path)
+// 			fd.Owner = req.ClientId
+// 			fds = append(fds, fd)
+// 			pfd.AddChild(fd)
+// 			pfd = fd
+// 		} else {
+// 			//exists
+// 			pfd = pfd.FindChildWithFilePath(path)
+// 			fds = append(fds, pfd)
+// 		}
+// 	}
+// 	if since == -1 {
+// 		return fmt.Errorf("file server: dir: %s exists", req.FilePath)
+// 	} else {
+// 		var i int
+// 		if since > 0 {
+// 			i = since - 1 // because the parent directory also needs to update last modified time
+// 		} else {
+// 			i = since
+// 		}
+// 		timestamp := time.Now().Unix()
+// 		for ; i < len(fds); i++ {
+// 			fds[i].lastModified = timestamp
+// 		}
+// 	}
+// 	resp.Fd = fds[since]
+// 	return nil
+// }
 
-func (fs *FileServer) RmDir(req RemoveRequest, resp *RemoveResponse) error {
-	log.Printf("FileServer.RmDir is called")
-	root, _, err := fs.find(req.FilePath)
-	if err != nil {
-		return err
-	}
-	localPath := filepath.Join(root, req.FilePath)
-	if err := os.RemoveAll(localPath); err != nil {
-		resp.IsRemoved = false
-		return fmt.Errorf("file server: remove %s error: %v", req.FilePath, err)
-	}
-	// update on tree
-	rootfd := fs.trees[root]
-	pfd := Search(rootfd, filepath.Dir(req.FilePath))
-	// pfd.Sub.Publish(DirectoryUpdateTopic, )
-	pfd.RemoveChild(req.FilePath)
-	resp.IsRemoved = true
-	return nil
-}
+// func (fs *FileServer) RmDir(req RemoveRequest, resp *RemoveResponse) error {
+// 	log.Printf("FileServer.RmDir is called")
+// 	root, _, err := fs.find(req.FilePath)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	localPath := filepath.Join(root, req.FilePath)
+// 	if err := os.RemoveAll(localPath); err != nil {
+// 		resp.IsRemoved = false
+// 		return fmt.Errorf("file server: remove %s error: %v", req.FilePath, err)
+// 	}
+// 	// update on tree
+// 	rootfd := fs.fileIndexTrees[root]
+// 	pfd := Search(rootfd, filepath.Dir(req.FilePath))
+// 	// TODO:
+// 	// pfd.Sub.Publish(DirectoryUpdateTopic, )
+// 	pfd.RemoveChild(req.FilePath)
+// 	resp.IsRemoved = true
+// 	return nil
+// }
 
 func (fs *FileServer) Read(req ReadRequest, resp *ReadResponse) error {
 	log.Printf("FileServer.Read is called")
@@ -201,12 +227,14 @@ func (fs *FileServer) Write(req WriteRequest, resp *WriteResponse) error {
 	if err != nil {
 		return fmt.Errorf("file server: write error %v", err)
 	}
-	fd := Search(fs.trees[root], req.FilePath)
-	args := &UpdateFileRequest{
+	fd := Search(fs.fileIndexTrees[root], req.FilePath)
+	fd.lastModified = time.Now().Unix()
+	// if the client choose not to register here, no update would be seen at the client side
+	args := &CallbackUpdateFileRequest{
 		FilePath: req.FilePath,
 		Data:     req.Data,
 	}
-	fd.sub.Publish(req.ClientId, FileUpdateTopic, args)
+	fd.sub.Broadcast(req.ClientId, FileUpdateTopic, args)
 	return nil
 }
 
@@ -222,15 +250,16 @@ func (fs *FileServer) Remove(req RemoveRequest, resp *RemoveResponse) error {
 		return fmt.Errorf("file server: %v", err)
 	}
 	// update on tree
-	rootfd := fs.trees[root]
+	rootfd := fs.fileIndexTrees[root]
 	pfd := Search(rootfd, filepath.Dir(req.FilePath))
 	pfd.RemoveChild(req.FilePath)
+	pfd.lastModified = time.Now().Unix()
 	resp.IsRemoved = true
-	args := &UpdateFileRequest{
+	args := &CallbackUpdateFileRequest{
 		FilePath:  req.FilePath,
 		IsRemoved: true,
 	}
-	pfd.sub.Publish(req.ClientId, FileUpdateTopic, args)
+	pfd.sub.Broadcast(req.ClientId, FileUpdateTopic, args)
 	return nil
 }
 
@@ -238,12 +267,12 @@ func NewFileServer(config *config.Config) *FileServer {
 	exportedRootPaths := os.Getenv("EXPORT_ROOT_PATHS")
 	paths := strings.Split(exportedRootPaths, ":")
 	fs := &FileServer{
-		addr:              config.ServerAddr,
+		addr:              config.RemoteAddr,
 		exportedRootPaths: paths,
-		trees:             make(map[string]*FileDescriptor),
+		fileIndexTrees:    make(map[string]*FileDescriptor),
 	}
 	for _, path := range paths {
-		fs.trees[path] = buildTree(path)
+		fs.fileIndexTrees[path] = buildTree(path)
 	}
 	fs.rpcServer = rpc.NewServer()
 	if err := fs.rpcServer.Register(fs); err != nil {

@@ -27,9 +27,9 @@ func (s *Subscriber) UpdateFile(args interface{}) {
 		log.Printf("subscriber: rpc dial error: %v", err)
 		return
 	}
-	var reply UpdateFileResponse
-	if err := conn.Call("FileClient.UpdateFile", args, &reply); err != nil {
-		log.Printf("call FileClient.UpdateFile error: %v", err)
+	var reply CallbackUpdateFileResponse
+	if err := conn.Call("FileClient.CallbackUpdateFile", args, &reply); err != nil {
+		log.Printf("call FileClient.CallbackUpdateFile error: %v", err)
 		return
 	}
 }
@@ -45,6 +45,9 @@ func NewSubscription() *Subscription {
 }
 
 func (sub *Subscription) Subscribe(clientId, clientAddr string) {
+	if clientId == "" || clientAddr == "" {
+		return
+	}
 	sub.Members[clientId] = &Subscriber{
 		Id:   clientId,
 		Addr: clientAddr,
@@ -56,7 +59,7 @@ func (sub *Subscription) Unsubscribe(clientId string) {
 }
 
 // excludeId is the client to be excluded from this update
-func (sub *Subscription) Publish(excludeId string, topic Topic, args interface{}) {
+func (sub *Subscription) Broadcast(excludeId string, topic Topic, args interface{}) {
 	switch topic {
 	case FileUpdateTopic:
 		for id, subscribers := range sub.Members {

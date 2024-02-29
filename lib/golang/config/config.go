@@ -1,14 +1,15 @@
 package config
 
 import (
-	"path/filepath"
-	"gopkg.in/yaml.v3"
 	"log"
 	"os"
+	"path/filepath"
+
+	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
-	ServerAddr      string `yaml:"serverAddr"`
+	RemoteAddr string `yaml:"serverAddr"`
 }
 
 func GetConfig() *Config {

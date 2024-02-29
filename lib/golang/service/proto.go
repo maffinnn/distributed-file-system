@@ -60,14 +60,24 @@ type WriteResponse struct {
 	N int64 // number of bytes wrote
 }
 
-type UpdateFileRequest struct {
+// client side update callback
+type CallbackUpdateFileRequest struct {
 	FilePath  string
 	IsRemoved bool
 	Data      []byte
 }
 
-type UpdateFileResponse struct {
+type CallbackUpdateFileResponse struct {
 	IsSuccess bool
+}
+
+type GetAttributeRequest struct {
+	ClientId string
+	FilePath string
+}
+
+type GetAttributeResponse struct {
+	Fd *FileDescriptor
 }
 
 func init() {
@@ -83,7 +93,9 @@ func init() {
 	rpc.RegisterType(RemoveResponse{})
 	rpc.RegisterType(WriteRequest{})
 	rpc.RegisterType(WriteResponse{})
-	rpc.RegisterType(UpdateFileRequest{})
-	rpc.RegisterType(UpdateFileResponse{})
+	rpc.RegisterType(GetAttributeRequest{})
+	rpc.RegisterType(GetAttributeResponse{})
+	rpc.RegisterType(CallbackUpdateFileRequest{})
+	rpc.RegisterType(CallbackUpdateFileResponse{})
 	rpc.RegisterType(struct{}{})
 }

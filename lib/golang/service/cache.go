@@ -19,7 +19,11 @@ func NewCache() *Cache {
 }
 
 func (c *Cache) Set(key string, value []byte) (int, error) {
-	c.cc[key] = &Entry{}
+	if _, ok := c.cc[key]; !ok {
+		c.cc[key] = NewEntry()
+	} else {
+		c.cc[key].Reset()
+	}
 	return c.cc[key].Write(value)
 }
 
@@ -32,16 +36,28 @@ func (c *Cache) Get(key string) (*Entry, error) {
 
 func (c *Cache) Reset(key string) {}
 
-// cache object implements one-copy semantics
 type Entry struct {
+	dirty         bool
 	lastValidated time.Time // time when the cache entry was last validated
 	b             *bytes.Buffer
+}
+
+func NewEntry() *Entry {
+	return &Entry{
+		dirty:         false,
+		lastValidated: time.Now(),
+		b:             &bytes.Buffer{},
+	}
 }
 
 func (e *Entry) Len() int { return e.b.Len() }
 
 func (e *Entry) Bytes() []byte { return e.b.Bytes() }
 
-func (e *Entry) Reset() { e.b.Reset() }
+func (e *Entry) Reset() {
+	e.b.Reset()
+}
 
-func (e *Entry) Write(b []byte) (int, error) { return e.b.Write(b) }
+func (e *Entry) Write(b []byte) (int, error) {
+	return e.b.Write(b)
+}

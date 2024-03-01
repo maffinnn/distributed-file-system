@@ -3,35 +3,37 @@ package service
 import (
 	"fmt"
 	"path/filepath"
+	fp "path/filepath"
 	"strings"
 )
 
 type Volume struct {
 	fstype FileSystemType
 	root   *FileDescriptor // root of the volume
-	cache  *Cache
 }
 
 func NewVolume(root *FileDescriptor, fstype FileSystemType) *Volume {
-	return &Volume{root: root, fstype: fstype, cache: NewCache()}
+	return &Volume{root: root, fstype: fstype}
 }
 
 type FileDescriptor struct {
-	IsDir        bool
-	FilePath     string // server-side path to the file
-	Owner        string // owner of the file
-	Seeker       uint64 // last seek position, only used at client side
-	Children     []*FileDescriptor
-	sub          *Subscription // list of client ids that are subscribe to this file descriptor
-	lastModified int64         // last modification time in unix time
+	IsDir           bool
+	Filepath        string // server-side path to the file
+	owner           string // owner of the file
+	Seeker          uint64 // last seek position, only used at client side
+	Children        []*FileDescriptor
+	subscription    *Subscription    // list of client ids that are subscribe to this file descriptor
+	LastModified    int64            // last modification time in unix time
+	CallbackPromise *CallbackPromise // callback promise for andrew filesystem, used at client side
 }
 
-func NewFileDescriptor(isdir bool, filepath string) *FileDescriptor {
+func NewFileDescriptor(isDir bool, filepath string) *FileDescriptor {
 	return &FileDescriptor{
-		IsDir:    isdir,
-		FilePath: filepath,
-		Children: make([]*FileDescriptor, 0),
-		sub:      NewSubscription(),
+		IsDir:        isDir,
+		Filepath:     filepath,
+		Seeker:       0,
+		Children:     make([]*FileDescriptor, 0),
+		subscription: NewSubscription(),
 	}
 }
 
@@ -42,16 +44,16 @@ func PrintTree(prefix string, root *FileDescriptor) {
 
 // find the matching file descriptor by searching from the tree root
 // the given file string must remove the server root path
-func Search(root *FileDescriptor, file string) *FileDescriptor {
+func Search(root *FileDescriptor, filepath string) *FileDescriptor {
 	if root == nil {
 		return nil
 	}
-	if strings.HasSuffix(root.FilePath, file) {
+	if strings.HasSuffix(root.Filepath, filepath) {
 		return root
 	}
 	var found *FileDescriptor
 	for _, cfd := range root.Children {
-		found = Search(cfd, file)
+		found = Search(cfd, filepath)
 		if found != nil {
 			return found
 		}
@@ -60,15 +62,15 @@ func Search(root *FileDescriptor, file string) *FileDescriptor {
 }
 
 // remove from the tree rooted at `root`
-func RemoveFromTree(root *FileDescriptor, file string) {
-	parent := filepath.Dir(file) // parent filepath
+func RemoveFromTree(root *FileDescriptor, filepath string) {
+	parent := fp.Dir(filepath) // parent filepath
 	pfd := Search(root, parent)
-	pfd.RemoveChild(file)
+	pfd.RemoveChild(filepath)
 }
 
 // add fd to the tree rooted at the `root`
 func AddToTree(root *FileDescriptor, fd *FileDescriptor) {
-	parent := filepath.Dir(fd.FilePath) // parent filepath
+	parent := fp.Dir(fd.Filepath) // parent filepath
 	pfd := Search(root, parent)
 	pfd.AddChild(fd)
 }
@@ -77,25 +79,25 @@ func (fd *FileDescriptor) AddChild(child *FileDescriptor) {
 	fd.Children = append(fd.Children, child)
 }
 
-func (fd *FileDescriptor) RemoveChild(file string) {
-	idx := fd.FindChildIndex(file)
+func (fd *FileDescriptor) RemoveChild(filepath string) {
+	idx := fd.FindChildIndex(filepath)
 	if idx != -1 {
 		fd.Children = append(fd.Children[:idx], fd.Children[idx+1:]...)
 	}
 }
 
-func (fd *FileDescriptor) FindChildWithFilePath(file string) *FileDescriptor {
+func (fd *FileDescriptor) FindChildWithFilePath(filepath string) *FileDescriptor {
 	for _, cfd := range fd.Children {
-		if strings.HasSuffix(cfd.FilePath, file) {
+		if strings.HasSuffix(cfd.Filepath, filepath) {
 			return cfd
 		}
 	}
 	return nil
 }
 
-func (fd *FileDescriptor) FindChildIndex(file string) int {
+func (fd *FileDescriptor) FindChildIndex(filepath string) int {
 	for idx, cfd := range fd.Children {
-		if strings.HasSuffix(cfd.FilePath, file) {
+		if strings.HasSuffix(cfd.Filepath, filepath) {
 			return idx
 		}
 	}
@@ -103,7 +105,7 @@ func (fd *FileDescriptor) FindChildIndex(file string) int {
 }
 
 func print(rootpath string, fd *FileDescriptor) {
-	fmt.Printf("\t%s\n", filepath.Join(rootpath, fd.FilePath))
+	fmt.Printf("\t%s\n", filepath.Join(rootpath, fd.Filepath))
 	for _, cfd := range fd.Children {
 		print(rootpath, cfd)
 	}
@@ -114,7 +116,7 @@ func Subscribe(root *FileDescriptor, clientId, clientAddr string) {
 	if root == nil {
 		return
 	}
-	root.sub.Subscribe(clientId, clientAddr)
+	root.subscription.Subscribe(clientId, clientAddr)
 	for _, cfd := range root.Children {
 		Subscribe(cfd, clientId, clientAddr)
 	}
@@ -124,7 +126,7 @@ func Unsubscribe(root *FileDescriptor, clientId string) {
 	if root == nil {
 		return
 	}
-	root.sub.Unsubscribe(clientId)
+	root.subscription.Unsubscribe(clientId)
 	for _, cfd := range root.Children {
 		Unsubscribe(cfd, clientId)
 	}

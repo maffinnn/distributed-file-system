@@ -3,6 +3,7 @@ package rpc
 import (
 	"errors"
 	"log"
+	"math/rand"
 	"net"
 	"reflect"
 	"strings"
@@ -159,6 +160,13 @@ func (server *Server) sendResponse(conn *net.UDPConn, addr *net.UDPAddr, h *code
 		log.Println("rpc server: encode response error:", err)
 		return
 	}
+
+	// simulate packet loss
+	// rand.Float64 generates a float64 f: 0.0 <= f < 1.0
+	if rand.Float64() < NetworkPacketLossProbability {
+		return
+	}
+
 	_, err = conn.WriteToUDP(data, addr)
 	if err != nil {
 		log.Println("rpc server: write response error:", err)

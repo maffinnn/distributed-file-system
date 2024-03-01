@@ -8,15 +8,16 @@ import (
 	"os"
 	fp "path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"distributed-file-system/lib/golang/config"
 	"distributed-file-system/lib/golang/rpc"
 )
 
-const (
-	duration     int           = 20
-	pollInterval time.Duration = 1 * time.Second
+var (
+	duration     int           = 30
+	pollInterval time.Duration = 10 * time.Millisecond
 )
 
 type FileClient struct {
@@ -25,15 +26,17 @@ type FileClient struct {
 	rpcClient *rpc.Client
 	rpcServer *rpc.Server
 	stop      chan struct{}
-	volumnes  map[string]*Volume // mounted files
+	volumes   map[string]*Volume // mounted files
+	cache     *Cache
 }
 
 func NewFileClient(id, addr string, config *config.Config) *FileClient {
 	fc := &FileClient{
-		id:       id,
-		addr:     addr,
-		stop:     make(chan struct{}),
-		volumnes: make(map[string]*Volume),
+		id:      id,
+		addr:    addr,
+		stop:    make(chan struct{}),
+		volumes: make(map[string]*Volume),
+		cache:   NewCache(),
 	}
 	fc.rpcServer = rpc.NewServer()
 	if err := fc.rpcServer.Register(fc); err != nil {
@@ -62,7 +65,6 @@ func (fc *FileClient) Run() {
 }
 
 func (fc *FileClient) Mount(src, target string, fstype FileSystemType) error {
-
 	args := &MountRequest{FilePath: src}
 	if fstype == AndrewFileSystemType {
 		args.ClientId = fc.id
@@ -74,7 +76,7 @@ func (fc *FileClient) Mount(src, target string, fstype FileSystemType) error {
 	}
 	log.Printf("[file client %s]: %s is mounted at %v", fc.id, src, target)
 	root := reply.Fd
-	fc.volumnes[target] = NewVolume(root, fstype)
+	fc.volumes[target] = NewVolume(root, fstype)
 	fc.ListFiles(target)
 	// NFS requires polling at the client side
 	if fstype == SunNetworkFileSystemType {
@@ -101,37 +103,42 @@ func (fc *FileClient) poll() {
 			return
 		default:
 			// check for all cached(open) file
-			for _, v := range fc.volumnes {
-				for filepath, entry := range v.cache.cc {
-					now := time.Now()
+			var wg sync.WaitGroup
+			now := time.Now()
+			for filepath, entry := range fc.cache.cc {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
 					if now.Sub(entry.lastValidated) < pollInterval {
-						continue // consider valid
+						return // consider valid
 					}
 					getArgs := &GetAttributeRequest{ClientId: fc.id, FilePath: filepath}
 					var getReply GetAttributeResponse
 					if err := fc.rpcClient.Call("FileServer.GetAttribute", getArgs, &getReply); err != nil {
 						log.Printf("[file client %s]: call FileServer.GetAttribute error: %v", fc.id, err)
-						continue
+						return
 					}
-					fd := Search(v.root, filepath)
-					lastModifiedAtServer := getReply.Fd.lastModified
-					if lastModifiedAtServer == fd.lastModified {
+					_, fd, _ := fc.find(filepath)
+					lastModifiedAtServer := getReply.Fd.LastModified
+					if lastModifiedAtServer == fd.LastModified {
 						// no change at the server, update the lastValidated timestamp
 						entry.lastValidated = now
-						continue
+						return
 					}
 					// invalidated the entry
-					readArgs := &ReadRequest{ClientId: fc.id, FilePath: fd.FilePath}
+					readArgs := &ReadRequest{ClientId: fc.id, FilePath: fd.Filepath}
 					var readReply ReadResponse
 					if err := fc.rpcClient.Call("FileServer.Read", readArgs, &readReply); err != nil {
 						log.Printf("call FileServer.Read error: %v", err)
-						continue
+						return
 					}
 					entry.Reset()
 					entry.Write(readReply.Data)
 					entry.lastValidated = now
-				}
+					entry.dirty = false
+				}()
 			}
+			wg.Wait()
 		}
 	}
 }
@@ -142,26 +149,243 @@ func (fc *FileClient) Unmount(src, target string) error {
 	if err := fc.rpcClient.Call("FileServer.Unmount", args, &reply); err != nil {
 		return fmt.Errorf("[file client %s]: call FileServer.Unmount error: %v", fc.id, err)
 	}
-	delete(fc.volumnes, target)
+	delete(fc.volumes, target)
 	fc.ListAllFiles()
 	return nil
 }
 
 // create a file
-func (fc *FileClient) Create(localPath string) error {
+func (fc *FileClient) Create(localPath string) (*FileDescriptor, error) {
 	mountPoint, err := fc.checkMountingPoint(localPath)
 	if err != nil {
-		return fmt.Errorf("[file client %s]: %v", fc.id, err)
+		return nil, fmt.Errorf("[file client %s]: %v", fc.id, err)
 	}
-	v := fc.volumnes[mountPoint]
-	filepath := strings.TrimPrefix(localPath, mountPoint)
-	args := &CreateRequest{FilePath: fp.Join(v.root.FilePath, filepath)}
+	v := fc.volumes[mountPoint]
+	filepathSuffix := strings.TrimPrefix(localPath, mountPoint)
+	args := &CreateRequest{FilePath: fp.Join(v.root.Filepath, filepathSuffix)}
 	var reply CreateResponse
 	if err := fc.rpcClient.Call("FileServer.Create", args, &reply); err != nil {
-		return fmt.Errorf("[file client %s]: call FileServer.Create error: %v", fc.id, err)
+		return nil, fmt.Errorf("[file client %s]: call FileServer.Create error: %v", fc.id, err)
 	}
 	AddToTree(v.root, reply.Fd)
+	return reply.Fd, nil
+}
+
+func (fc *FileClient) checkMountingPoint(file string) (string, error) {
+	for mountPoint := range fc.volumes {
+		if strings.HasPrefix(file, mountPoint) {
+			return mountPoint, nil
+		}
+	}
+	return "", os.ErrNotExist
+}
+
+func (fc *FileClient) Open(localPath string) (*FileDescriptor, error) {
+	mountPoint, err := fc.checkMountingPoint(localPath)
+	if err != nil {
+		return nil, err
+	}
+	v := fc.volumes[mountPoint]
+	filepath := strings.TrimPrefix(localPath, mountPoint)
+	fd := Search(v.root, filepath)
+	if v.fstype == AndrewFileSystemType {
+		fd.CallbackPromise = NewCallbackPromise()
+	}
+	return fd, nil
+}
+
+// Idempotent Read Operation:
+// stateless read operation, does not change the seeker position of the file descriptor
+// Note: provIded file must be a single file not a directory
+func (fc *FileClient) ReadAt(fd *FileDescriptor, offset, n int) ([]byte, error) {
+	if fd == nil {
+		return nil, fmt.Errorf("invalid read operation, filedescriptor is null")
+	}
+	if fd.IsDir {
+		return nil, fmt.Errorf("invalid read operation, current file is a directory")
+	}
+	// check cache
+	if _, err := fc.cache.Get(fd.Filepath); err != nil {
+		// not cached
+		args := &ReadRequest{FilePath: fd.Filepath}
+		var reply ReadResponse
+		if err := fc.rpcClient.Call("FileServer.Read", args, &reply); err != nil {
+			return nil, fmt.Errorf("call FileServer.Read error: %v", err)
+		}
+		fc.cache.Set(fd.Filepath, reply.Data)
+	}
+
+	cached, _ := fc.cache.Get(fd.Filepath)
+	if offset >= cached.Len() {
+		return nil, fmt.Errorf("invalid read: offset exceeds the file length")
+	}
+	return cached.Bytes()[offset:min(offset+n, cached.Len())], nil
+}
+
+// Non-Idempotent Read: read from last seek position recorded at client sIde fd
+// Note: provIded file must be a single file not a directory
+func (fc *FileClient) Read(fd *FileDescriptor, n int) ([]byte, error) {
+	if fd == nil {
+		return nil, fmt.Errorf("invalid read operation, filedescriptor is null")
+	}
+	if fd.IsDir {
+		return nil, fmt.Errorf("invalid read operation, current file is a directory")
+	}
+	// check cache
+	if _, err := fc.cache.Get(fd.Filepath); err != nil {
+		// not cached
+		args := &ReadRequest{FilePath: fd.Filepath}
+		var reply ReadResponse
+		if err := fc.rpcClient.Call("FileServer.Read", args, &reply); err != nil {
+			return nil, fmt.Errorf("call FileServer.Read error: %v", err)
+		}
+		fc.cache.Set(fd.Filepath, reply.Data)
+	}
+
+	cached, _ := fc.cache.Get(fd.Filepath)
+	// update last read end position
+	lastOffset := int(fd.Seeker)
+	fd.Seeker = uint64(min(lastOffset+n, cached.Len()))
+	return cached.Bytes()[lastOffset:int(fd.Seeker)], nil
+}
+
+func (fc *FileClient) Write(fd *FileDescriptor, offset int, data []byte) (int, error) {
+	if fd == nil {
+		return 0, fmt.Errorf("invalid write operation, filedescriptor is null")
+	}
+	if fd.IsDir {
+		return 0, fmt.Errorf("invalid write operation, current file is a directory")
+	}
+	// update cached content
+	// check cache
+	if _, err := fc.cache.Get(fd.Filepath); err != nil {
+		// not cached
+		args := &ReadRequest{FilePath: fd.Filepath}
+		var reply ReadResponse
+		if err := fc.rpcClient.Call("FileServer.Read", args, &reply); err != nil {
+			return 0, fmt.Errorf("call FileServer.Read error: %v", err)
+		}
+		fc.cache.Set(fd.Filepath, reply.Data)
+	}
+	cached, _ := fc.cache.Get(fd.Filepath)
+	if offset >= cached.Len() {
+		return 0, fmt.Errorf("invalid write: offset exceeds the file length")
+	}
+	copy := &bytes.Buffer{}
+	copy.Write(cached.Bytes())
+	cached.Reset()
+	cached.Write(copy.Bytes()[:offset])
+	n, err := cached.Write(data)
+	if err != nil {
+		return n, err
+	}
+	cached.Write(copy.Bytes()[offset:])
+	cached.dirty = true
+
+	if v, _, err := fc.find(fd.Filepath); err == nil {
+		if v.fstype == SunNetworkFileSystemType {
+			// evict cache to server as soon as possible
+			args := &WriteRequest{ClientId: fc.id, FilePath: fd.Filepath, Data: cached.Bytes()}
+			var reply WriteResponse
+			if err := fc.rpcClient.Call("FileServer.Write", args, &reply); err != nil {
+				log.Printf("call FileServer.Write error: %v", err)
+				return 0, err
+			} else {
+				cached.dirty = false
+			}
+		}
+	}
+	return n, nil
+}
+
+func (fc *FileClient) Close(fd *FileDescriptor) {
+	if fd == nil {
+		return
+	}
+	if fd.IsDir {
+		return // will never be cached so no update to server
+	}
+	cached, err := fc.cache.Get(fd.Filepath)
+	if err != nil {
+		return // not cached
+	}
+	if !cached.dirty {
+		return
+	}
+	// evict cache to server
+	args := &WriteRequest{ClientId: fc.id, FilePath: fd.Filepath, Data: cached.Bytes()}
+	var reply WriteResponse
+	if err := fc.rpcClient.Call("FileServer.Write", args, &reply); err != nil {
+		log.Printf("call FileServer.Write error: %v", err)
+		return
+	}
+	cached.dirty = false
+}
+
+func (fc *FileClient) UpdateCallbackPromise(req UpdateCallbackPromiseRequest, resp *UpdateCallbackPromiseResponse) error {
+	log.Printf("FileClient.UpdateCallbackPromise is called")
+	_, fd, _ := fc.find(req.FilePath)
+	if fd == nil || fd.CallbackPromise == nil {
+		return nil
+	}
+	fd.CallbackPromise.Set(req.IsValidOrCanceled)
+	fmt.Printf("INFO [file client %s]: content in %s has updated\n", fc.id, req.FilePath)
 	return nil
+}
+
+func (fc *FileClient) Remove(fd *FileDescriptor) error {
+	if fd == nil {
+		return fmt.Errorf("invalid remove operation, filedescriptor is null")
+	}
+	args := &RemoveRequest{ClientId: fc.id, FilePath: fd.Filepath}
+	var reply RemoveResponse
+	if err := fc.rpcClient.Call("FileServer.Remove", args, &reply); err != nil {
+		return fmt.Errorf("[file client %s]: call FileSever.Remove error: %v", fc.id, err)
+	}
+	// search all the volumnes
+	for _, v := range fc.volumes {
+		found := Search(v.root, fd.Filepath)
+		if found != nil {
+			log.Printf("reply: remove status %v", reply.IsRemoved)
+			RemoveFromTree(v.root, fd.Filepath)
+			return nil
+		}
+	}
+	return fmt.Errorf("[file client %s] error removing the file", fc.id)
+}
+
+func (fc *FileClient) find(filepath string) (*Volume, *FileDescriptor, error) {
+	for _, v := range fc.volumes {
+		found := Search(v.root, filepath)
+		if found != nil {
+			return v, found, nil
+		}
+	}
+	return nil, nil, os.ErrNotExist
+}
+
+func (fc *FileClient) Shutdown() {
+	fc.stop <- struct{}{}
+	fc.rpcServer.Shutdown()
+}
+
+// utility function for display purpose
+func (fc *FileClient) ListAllFiles() {
+	fmt.Printf("local file tree:\n")
+	for root, v := range fc.volumes {
+		PrintTree(root, v.root)
+	}
+}
+
+func (fc *FileClient) ListFiles(path string) {
+	mountPoint, err := fc.checkMountingPoint(path)
+	if err != nil {
+		log.Printf("[file client %s]: %v", fc.id, err)
+		return
+	}
+	fmt.Printf("local file tree:\n")
+	v := fc.volumes[mountPoint]
+	PrintTree(path, v.root)
 }
 
 // func (fc *FileClient) MakeDir(dir string) error {
@@ -196,162 +420,3 @@ func (fc *FileClient) Create(localPath string) error {
 // 	RemoveFromTree(fd, filepath.Join(fd.FilePath, suffix))
 // 	return nil
 // }
-
-func (fc *FileClient) checkMountingPoint(file string) (string, error) {
-	for mountPoint := range fc.volumnes {
-		if strings.HasPrefix(file, mountPoint) {
-			return mountPoint, nil
-		}
-	}
-	return "", os.ErrNotExist
-}
-
-// Idempotent Read Operation:
-// stateless read operation, does not change the seeker position of the file descriptor
-// Note: provIded file must be a single file not a directory
-func (fc *FileClient) ReadAt(localPath string, offset, n int) ([]byte, error) {
-	mountPoint, err := fc.checkMountingPoint(localPath)
-	if err != nil {
-		return nil, err
-	}
-	v := fc.volumnes[mountPoint]
-	filepath := strings.TrimPrefix(localPath, mountPoint)
-	fd := Search(v.root, filepath)
-	if fd.IsDir {
-		return nil, fmt.Errorf("invalId read operation, %s is a directory", localPath)
-	}
-
-	// check cache
-	if _, err := v.cache.Get(fd.FilePath); err != nil {
-		// not cached
-		args := &ReadRequest{FilePath: fd.FilePath}
-		var reply ReadResponse
-		if err := fc.rpcClient.Call("FileServer.Read", args, &reply); err != nil {
-			return nil, fmt.Errorf("call FileServer.Read error: %v", err)
-		}
-		v.cache.Set(fd.FilePath, reply.Data)
-	}
-
-	cached, _ := v.cache.Get(fd.FilePath)
-	if offset >= cached.Len() {
-		return nil, fmt.Errorf("invalId read: offset exceeds the file length")
-	}
-	return cached.Bytes()[offset:min(offset+n, cached.Len())], nil
-}
-
-// Non-Idempotent Read: read from last seek position recorded at client sIde fd
-// Note: provIded file must be a single file not a directory
-func (fc *FileClient) Read(localPath string, n int) ([]byte, error) {
-	mountPoint, err := fc.checkMountingPoint(localPath)
-	if err != nil {
-		return nil, err
-	}
-	v := fc.volumnes[mountPoint]
-	filepath := strings.TrimPrefix(localPath, mountPoint)
-	fd := Search(v.root, filepath)
-	if fd.IsDir {
-		return nil, fmt.Errorf("invalId read operation, %s is a directory", localPath)
-	}
-	// check cache
-	if _, err := v.cache.Get(fd.FilePath); err != nil {
-		// not cached
-		args := &ReadRequest{FilePath: fd.FilePath}
-		var reply ReadResponse
-		if err := fc.rpcClient.Call("FileServer.Read", args, &reply); err != nil {
-			return nil, fmt.Errorf("call FileServer.Read error: %v", err)
-		}
-		v.cache.Set(fd.FilePath, reply.Data)
-	}
-
-	cached, _ := v.cache.Get(fd.FilePath)
-	// update last read end position
-	lastOffset := int(fd.Seeker)
-	fd.Seeker = uint64(min(lastOffset+n, cached.Len()))
-	return cached.Bytes()[lastOffset:int(fd.Seeker)], nil
-}
-
-func (fc *FileClient) Write(localPath string, offset int, data []byte) (int, error) {
-	mountPoint, err := fc.checkMountingPoint(localPath)
-	if err != nil {
-		return 0, err
-	}
-	v := fc.volumnes[mountPoint]
-	filepath := strings.TrimPrefix(localPath, mountPoint)
-	fd := Search(v.root, filepath)
-	if fd.IsDir {
-		return 0, fmt.Errorf("invalId write operation, %s is a directory", localPath)
-	}
-
-	// update cached content
-	// check cache
-	if _, err := v.cache.Get(fd.FilePath); err != nil {
-		// not cached
-		args := &ReadRequest{FilePath: fd.FilePath}
-		var reply ReadResponse
-		if err := fc.rpcClient.Call("FileServer.Read", args, &reply); err != nil {
-			return 0, fmt.Errorf("call FileServer.Read error: %v", err)
-		}
-		v.cache.Set(fd.FilePath, reply.Data)
-	}
-	cached, _ := v.cache.Get(fd.FilePath)
-	if offset >= cached.Len() {
-		return 0, fmt.Errorf("invalId write: offset exceeds the file length")
-	}
-	copy := &bytes.Buffer{}
-	copy.Write(cached.Bytes())
-	cached.Reset()
-	cached.Write(copy.Bytes()[:offset])
-	n, err := cached.Write(data)
-	if err != nil {
-		return n, err
-	}
-	cached.Write(copy.Bytes()[offset:])
-	// evict cache to server
-	args := &WriteRequest{ClientId: fc.id, FilePath: fd.FilePath, Data: cached.Bytes()}
-	var reply WriteResponse
-	if err := fc.rpcClient.Call("FileServer.Write", args, &reply); err != nil {
-		return 0, fmt.Errorf("call FileServer.Write error: %v", err)
-	}
-	return n, nil
-}
-
-func (fc *FileClient) Remove(localPath string) error {
-	mountPoint, err := fc.checkMountingPoint(localPath)
-	if err != nil {
-		return fmt.Errorf("[file client %s]: %v", fc.id, err)
-	}
-	v := fc.volumnes[mountPoint]
-	filepath := strings.TrimPrefix(localPath, mountPoint)
-	args := &RemoveRequest{ClientId: fc.id, FilePath: fp.Join(v.root.FilePath, filepath)}
-	var reply RemoveResponse
-	if err := fc.rpcClient.Call("FileServer.Remove", args, &reply); err != nil {
-		return fmt.Errorf("[file client %s]: call FileSever.Remove error: %v", fc.id, err)
-	}
-	log.Printf("reply: remove status %v", reply.IsRemoved)
-	RemoveFromTree(v.root, fp.Join(v.root.FilePath, filepath))
-	return nil
-}
-
-func (fc *FileClient) Shutdown() {
-	fc.stop <- struct{}{}
-	fc.rpcServer.Shutdown()
-}
-
-// utility function for display purpose
-func (fc *FileClient) ListAllFiles() {
-	fmt.Printf("local file tree:\n")
-	for root, v := range fc.volumnes {
-		PrintTree(root, v.root)
-	}
-}
-
-func (fc *FileClient) ListFiles(path string) {
-	mountPoint, err := fc.checkMountingPoint(path)
-	if err != nil {
-		log.Printf("[file client %s]: %v", fc.id, err)
-		return
-	}
-	fmt.Printf("local file tree:\n")
-	v := fc.volumnes[mountPoint]
-	PrintTree(path, v.root)
-}

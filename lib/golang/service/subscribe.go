@@ -12,6 +12,27 @@ const (
 	DirectoryUpdateTopic Topic = "DirectoryUpdate"
 )
 
+// valid or cancelled
+type CallbackPromise struct {
+	ValidOrCanceled bool // true if it is valid, false otherwise
+}
+
+func NewCallbackPromise() *CallbackPromise {
+	return &CallbackPromise{
+		ValidOrCanceled: true,
+	}
+}
+
+func (cp *CallbackPromise) IsValid() bool { return cp.ValidOrCanceled }
+
+func (cp *CallbackPromise) IsCanceled() bool { return !cp.ValidOrCanceled }
+
+func (cp *CallbackPromise) Validate() { cp.ValidOrCanceled = true }
+
+func (cp *CallbackPromise) Cancel() { cp.ValidOrCanceled = false }
+
+func (cp *CallbackPromise) Set(value bool) { cp.ValidOrCanceled = value }
+
 type Subscription struct {
 	Members map[string]*Subscriber // key is the clientid
 }
@@ -27,9 +48,9 @@ func (s *Subscriber) UpdateFile(args interface{}) {
 		log.Printf("subscriber: rpc dial error: %v", err)
 		return
 	}
-	var reply CallbackUpdateFileResponse
-	if err := conn.Call("FileClient.CallbackUpdateFile", args, &reply); err != nil {
-		log.Printf("call FileClient.CallbackUpdateFile error: %v", err)
+	var reply UpdateCallbackPromiseResponse
+	if err := conn.Call("FileClient.UpdateCallbackPromise", args, &reply); err != nil {
+		log.Printf("call FileClient.UpdateCallbackPromise error: %v", err)
 		return
 	}
 }

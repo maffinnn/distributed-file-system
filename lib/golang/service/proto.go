@@ -61,13 +61,12 @@ type WriteResponse struct {
 }
 
 // client side update callback
-type CallbackUpdateFileRequest struct {
-	FilePath  string
-	IsRemoved bool
-	Data      []byte
+type UpdateCallbackPromiseRequest struct {
+	FilePath          string
+	IsValidOrCanceled bool
 }
 
-type CallbackUpdateFileResponse struct {
+type UpdateCallbackPromiseResponse struct {
 	IsSuccess bool
 }
 
@@ -95,7 +94,7 @@ func init() {
 	rpc.RegisterType(WriteResponse{})
 	rpc.RegisterType(GetAttributeRequest{})
 	rpc.RegisterType(GetAttributeResponse{})
-	rpc.RegisterType(CallbackUpdateFileRequest{})
-	rpc.RegisterType(CallbackUpdateFileResponse{})
+	rpc.RegisterType(UpdateCallbackPromiseRequest{})
+	rpc.RegisterType(UpdateCallbackPromiseResponse{})
 	rpc.RegisterType(struct{}{})
 }

@@ -56,7 +56,12 @@ func (fs *FileServer) Mount(req MountRequest, resp *MountResponse) error {
 	if fd == nil {
 		return fmt.Errorf("file server: no such file") // should never happen
 	}
-	Subscribe(fd, req.ClientId, req.ClientAddr)
+	if req.ClientId != "" && req.ClientAddr != "" {
+		// the client operates in an andrew filesystem way
+		// server records the client and sent back a callback promise
+		// the callback promise is initialized as valid
+		Subscribe(fd, req.ClientId, req.ClientAddr)
+	}
 	resp.Fd = fd
 	return nil
 }
@@ -76,7 +81,6 @@ func (fs *FileServer) Unmount(req UnmountRequest, resp *UnmountResponse) error {
 }
 
 func (fs *FileServer) GetAttribute(req GetAttributeRequest, resp *GetAttributeResponse) error {
-	log.Printf("FileServer.GetAttribute is called")
 	root, path, err := fs.find(req.FilePath)
 	if err != nil {
 		return fmt.Errorf("file server: %v", err)
@@ -111,8 +115,8 @@ func (fs *FileServer) Create(req CreateRequest, resp *CreateResponse) error {
 			return fmt.Errorf("file server: create error %v", err)
 		}
 		fd := NewFileDescriptor(false, req.FilePath)
-		fd.lastModified = time.Now().Unix()
-		fd.Owner = req.ClientId
+		fd.LastModified = time.Now().Unix()
+		fd.owner = req.ClientId
 		// add to tree
 		pfd.AddChild(fd)
 		resp.Fd = fd
@@ -194,7 +198,7 @@ func (fs *FileServer) Create(req CreateRequest, resp *CreateResponse) error {
 // }
 
 func (fs *FileServer) Read(req ReadRequest, resp *ReadResponse) error {
-	log.Printf("FileServer.Read is called")
+	// log.Printf("FileServer.Read is called")
 	root, _, err := fs.find(req.FilePath)
 	if err != nil {
 		return err
@@ -228,13 +232,13 @@ func (fs *FileServer) Write(req WriteRequest, resp *WriteResponse) error {
 		return fmt.Errorf("file server: write error %v", err)
 	}
 	fd := Search(fs.fileIndexTrees[root], req.FilePath)
-	fd.lastModified = time.Now().Unix()
+	fd.LastModified = time.Now().Unix()
 	// if the client choose not to register here, no update would be seen at the client side
-	args := &CallbackUpdateFileRequest{
-		FilePath: req.FilePath,
-		Data:     req.Data,
+	args := &UpdateCallbackPromiseRequest{
+		FilePath:          req.FilePath,
+		IsValidOrCanceled: false,
 	}
-	fd.sub.Broadcast(req.ClientId, FileUpdateTopic, args)
+	fd.subscription.Broadcast(req.ClientId, FileUpdateTopic, args)
 	return nil
 }
 
@@ -253,13 +257,13 @@ func (fs *FileServer) Remove(req RemoveRequest, resp *RemoveResponse) error {
 	rootfd := fs.fileIndexTrees[root]
 	pfd := Search(rootfd, filepath.Dir(req.FilePath))
 	pfd.RemoveChild(req.FilePath)
-	pfd.lastModified = time.Now().Unix()
+	pfd.LastModified = time.Now().Unix()
 	resp.IsRemoved = true
-	args := &CallbackUpdateFileRequest{
-		FilePath:  req.FilePath,
-		IsRemoved: true,
+	args := &UpdateCallbackPromiseRequest{
+		FilePath:          req.FilePath,
+		IsValidOrCanceled: false,
 	}
-	pfd.sub.Broadcast(req.ClientId, FileUpdateTopic, args)
+	pfd.subscription.Broadcast(req.ClientId, FileUpdateTopic, args)
 	return nil
 }
 
@@ -295,7 +299,7 @@ func buildTree(entry string) *FileDescriptor {
 		}
 		pfd := parents[filepath.Dir(currentPath)]
 		cfd := NewFileDescriptor(info.IsDir(), strings.TrimPrefix(currentPath, entry))
-		pfd.Children = append(pfd.Children, cfd)
+		pfd.AddChild(cfd)
 		if _, ok := parents[currentPath]; !ok {
 			parents[currentPath] = cfd
 		}

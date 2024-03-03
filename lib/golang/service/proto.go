@@ -11,7 +11,11 @@ type MountRequest struct {
 }
 
 type MountResponse struct {
-	Fd *FileDescriptor
+	IsDir           bool
+	FilePath        string
+	ChildrenPaths   string
+	LastModified    int64
+	CallbackPromise bool
 }
 
 type UnmountRequest struct {
@@ -20,7 +24,7 @@ type UnmountRequest struct {
 }
 
 type UnmountResponse struct {
-	Success bool
+	IsSuccess bool
 }
 
 type CreateRequest struct {
@@ -29,7 +33,8 @@ type CreateRequest struct {
 }
 
 type CreateResponse struct {
-	Fd *FileDescriptor
+	IsSuccess    bool
+	LastModified int64
 }
 
 type ReadRequest struct {
@@ -76,7 +81,9 @@ type GetAttributeRequest struct {
 }
 
 type GetAttributeResponse struct {
-	Fd *FileDescriptor
+	IsDir        bool
+	FilePath     string
+	LastModified int64
 }
 
 func init() {

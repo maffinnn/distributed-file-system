@@ -29,11 +29,10 @@ type FileDescriptor struct {
 
 func NewFileDescriptor(isDir bool, filepath string) *FileDescriptor {
 	return &FileDescriptor{
-		IsDir:        isDir,
-		Filepath:     filepath,
-		Seeker:       0,
-		Children:     make([]*FileDescriptor, 0),
-		subscription: NewSubscription(),
+		IsDir:    isDir,
+		Filepath: filepath,
+		Seeker:   0,
+		Children: make([]*FileDescriptor, 0),
 	}
 }
 

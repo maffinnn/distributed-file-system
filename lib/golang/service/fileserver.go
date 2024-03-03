@@ -45,7 +45,6 @@ func (fs *FileServer) find(file string) (string, string, error) {
 }
 
 func (fs *FileServer) Mount(req MountRequest, resp *MountResponse) error {
-	log.Printf("FileServer.Mount is called")
 	// every filepath is found through root + path for security
 	rootpath, path, err := fs.find(req.FilePath)
 	if err != nil {
@@ -62,7 +61,15 @@ func (fs *FileServer) Mount(req MountRequest, resp *MountResponse) error {
 		// the callback promise is initialized as valid
 		Subscribe(fd, req.ClientId, req.ClientAddr)
 	}
-	resp.Fd = fd
+	resp.IsDir = fd.IsDir
+	resp.FilePath = fd.Filepath
+	childrenPaths := ""
+	for _, cfd := range fd.Children {
+		childrenPaths = fmt.Sprintf("%s:%s", childrenPaths, cfd.Filepath)
+	}
+	resp.ChildrenPaths = childrenPaths
+	resp.LastModified = fd.LastModified
+	resp.CallbackPromise = true
 	return nil
 }
 
@@ -76,7 +83,7 @@ func (fs *FileServer) Unmount(req UnmountRequest, resp *UnmountResponse) error {
 	rootfd := fs.fileIndexTrees[root]
 	fd := Search(rootfd, path)
 	Unsubscribe(fd, req.ClientId)
-	resp.Success = true
+	resp.IsSuccess = true
 	return nil
 }
 
@@ -87,7 +94,10 @@ func (fs *FileServer) GetAttribute(req GetAttributeRequest, resp *GetAttributeRe
 	}
 	rootfd := fs.fileIndexTrees[root]
 	fd := Search(rootfd, path)
-	resp.Fd = fd
+
+	resp.IsDir = fd.IsDir
+	resp.FilePath = fd.Filepath
+	resp.LastModified = fd.LastModified
 	return nil
 }
 
@@ -115,11 +125,12 @@ func (fs *FileServer) Create(req CreateRequest, resp *CreateResponse) error {
 			return fmt.Errorf("file server: create error %v", err)
 		}
 		fd := NewFileDescriptor(false, req.FilePath)
+		fd.subscription = NewSubscription()
 		fd.LastModified = time.Now().Unix()
 		fd.owner = req.ClientId
 		// add to tree
 		pfd.AddChild(fd)
-		resp.Fd = fd
+		resp.IsSuccess = true
 		return nil
 	}
 	return fmt.Errorf("file server: %s already exists", filepath.Base(req.FilePath))
@@ -290,15 +301,17 @@ func buildTree(entry string) *FileDescriptor {
 		panic("no exported directories")
 	}
 	info, _ := os.Stat(entry)
-	entryfd := NewFileDescriptor(info.IsDir(), "")
+	root := NewFileDescriptor(info.IsDir(), "")
+	root.subscription = NewSubscription()
 	parents := make(map[string]*FileDescriptor)
-	parents[entry] = entryfd
+	parents[entry] = root
 	err := filepath.Walk(entry, func(currentPath string, info os.FileInfo, err error) error {
 		if currentPath == entry {
 			return nil
 		}
 		pfd := parents[filepath.Dir(currentPath)]
 		cfd := NewFileDescriptor(info.IsDir(), strings.TrimPrefix(currentPath, entry))
+		cfd.subscription = NewSubscription()
 		pfd.AddChild(cfd)
 		if _, ok := parents[currentPath]; !ok {
 			parents[currentPath] = cfd
@@ -309,7 +322,7 @@ func buildTree(entry string) *FileDescriptor {
 	if err != nil {
 		panic(fmt.Sprintf("file server build tree error: %v", err))
 	}
-	return entryfd
+	return root
 }
 
 func (fs *FileServer) Run() {

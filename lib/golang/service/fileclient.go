@@ -75,7 +75,11 @@ func (fc *FileClient) Mount(src, target string, fstype FileSystemType) error {
 		return fmt.Errorf("[file client %s]: call FileServer.Mount error: %v", fc.id, err)
 	}
 	log.Printf("[file client %s]: %s is mounted at %v", fc.id, src, target)
-	root := reply.Fd
+	root := NewFileDescriptor(reply.IsDir, reply.FilePath)
+	childrenPaths := strings.Split(reply.ChildrenPaths, ":")
+	for _, cp := range childrenPaths {
+		fc.mountRecursive(root, cp, fstype)
+	}
 	fc.volumes[target] = NewVolume(root, fstype)
 	fc.ListFiles(target)
 	// NFS requires polling at the client side
@@ -87,6 +91,25 @@ func (fc *FileClient) Mount(src, target string, fstype FileSystemType) error {
 		go fc.monitor(src, target)
 	}
 	return nil
+}
+
+func (fc *FileClient) mountRecursive(root *FileDescriptor, filepath string, fstype FileSystemType) {
+	if root == nil || filepath == "" {
+		return
+	}
+	args := &MountRequest{FilePath: filepath}
+	if fstype == AndrewFileSystemType {
+		args.ClientId = fc.id
+		args.ClientAddr = fc.addr
+	}
+	var reply MountResponse
+	_ = fc.rpcClient.Call("FileServer.Mount", args, &reply)
+	fd := NewFileDescriptor(reply.IsDir, reply.FilePath)
+	root.Children = append(root.Children, fd)
+	childrenPaths := strings.Split(reply.ChildrenPaths, ":")
+	for _, cp := range childrenPaths {
+		fc.mountRecursive(fd, cp, fstype)
+	}
 }
 
 func (fc *FileClient) monitor(src, target string) error {
@@ -119,7 +142,7 @@ func (fc *FileClient) poll() {
 						return
 					}
 					_, fd, _ := fc.find(filepath)
-					lastModifiedAtServer := getReply.Fd.LastModified
+					lastModifiedAtServer := getReply.LastModified
 					if lastModifiedAtServer == fd.LastModified {
 						// no change at the server, update the lastValidated timestamp
 						entry.lastValidated = now
@@ -167,8 +190,11 @@ func (fc *FileClient) Create(localPath string) (*FileDescriptor, error) {
 	if err := fc.rpcClient.Call("FileServer.Create", args, &reply); err != nil {
 		return nil, fmt.Errorf("[file client %s]: call FileServer.Create error: %v", fc.id, err)
 	}
-	AddToTree(v.root, reply.Fd)
-	return reply.Fd, nil
+
+	fd := NewFileDescriptor(false, fp.Join(v.root.Filepath, filepathSuffix))
+	fd.LastModified = reply.LastModified
+	AddToTree(v.root, fd)
+	return fd, nil
 }
 
 func (fc *FileClient) checkMountingPoint(file string) (string, error) {
@@ -188,6 +214,9 @@ func (fc *FileClient) Open(localPath string) (*FileDescriptor, error) {
 	v := fc.volumes[mountPoint]
 	filepath := strings.TrimPrefix(localPath, mountPoint)
 	fd := Search(v.root, filepath)
+	if fd == nil {
+		return nil, fmt.Errorf("unable to find file %s", localPath)
+	}
 	if v.fstype == AndrewFileSystemType {
 		fd.CallbackPromise = NewCallbackPromise()
 	}
@@ -199,7 +228,7 @@ func (fc *FileClient) Open(localPath string) (*FileDescriptor, error) {
 // Note: provIded file must be a single file not a directory
 func (fc *FileClient) ReadAt(fd *FileDescriptor, offset, n int) ([]byte, error) {
 	if fd == nil {
-		return nil, fmt.Errorf("invalid read operation, filedescriptor is null")
+		return nil, fmt.Errorf("invalid read operation, file descriptor is null")
 	}
 	if fd.IsDir {
 		return nil, fmt.Errorf("invalid read operation, current file is a directory")

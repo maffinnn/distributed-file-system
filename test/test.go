@@ -173,10 +173,6 @@ func TestCacheConsistencyNFSSenario2(conf *config.Config) {
 	Senario2(c1, c2)
 }
 
-func TestSeek(conf *config.Config) {
-
-}
-
 func main() {
 	pwd, _ := os.Getwd()
 	log.Println(pwd)

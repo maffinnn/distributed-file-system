@@ -9,8 +9,15 @@ import (
 	"sync/atomic"
 )
 
-func RegisterType(value interface{}) {
-	gob.Register(value)
+var customTypes map[string]interface{}
+
+func init() {
+	customTypes = make(map[string]interface{}, 0)
+}
+
+func RegisterType(any interface{}) {
+	gob.Register(any)
+	customTypes[reflect.TypeOf(any).Name()] = any
 }
 
 type methodType struct {

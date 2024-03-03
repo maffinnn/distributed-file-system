@@ -1,7 +1,6 @@
 package rpc
 
 import (
-	"distributed-file-system/lib/golang/rpc/codec"
 	"errors"
 	"fmt"
 	"io"
@@ -13,9 +12,9 @@ import (
 )
 
 const (
-	retry                        uint64        = 5
-	timeout                      time.Duration = 1 * time.Millisecond
-	NetworkPacketLossProbability float64       = 0.1
+	retry                        uint64        = 7
+	timeout                      time.Duration = 10 * time.Millisecond
+	NetworkPacketLossProbability float64       = 0.0
 )
 
 func init() {
@@ -44,7 +43,7 @@ func (call *Call) done() {
 // multiple goroutines simultaneously.
 type Client struct {
 	conn     *net.UDPConn
-	cc       codec.Codec
+	cc       Codec
 	sending  sync.Mutex // protect following
 	mu       sync.Mutex // protect following
 	seq      uint64
@@ -113,7 +112,7 @@ func (client *Client) retry() {
 		client.pending.Range(func(key, value interface{}) bool {
 			call := value.(*Call)
 			if call.Attempts >= retry {
-				client.terminateCalls(errors.New("rpc client packet loss due to poor internet connection"))
+				client.terminateCalls(fmt.Errorf("rpc client packet %d lost due to poor internet connection", call.Seq))
 				return true
 			}
 			if time.Since(call.LastTryTimestamp) >= timeout {
@@ -128,12 +127,12 @@ func (client *Client) retry() {
 func (client *Client) receive() {
 	var err error
 	for err == nil {
-		buf := make([]byte, maxBufferSize)
+		buf := make([]byte, MaxBufferSize)
 		n, _, err := client.conn.ReadFromUDP(buf)
 		if err != nil {
 			log.Printf("rpc client: error reading from UDP: %v", err)
 		}
-		var m codec.Message
+		var m Message
 		err = client.cc.Decode(buf[:n], &m)
 		if err != nil {
 			log.Printf("rpc client: error decode the message: %v", err)
@@ -145,7 +144,7 @@ func (client *Client) receive() {
 			// it usually means that Write partially failed
 			// and call was already removed.
 		case h.Error != "":
-			call.Error = fmt.Errorf(h.Error)
+			call.Error = errors.New(h.Error)
 			call.done()
 		default:
 			deepCopy(m.Body, call.Reply)
@@ -157,7 +156,7 @@ func (client *Client) receive() {
 }
 
 func NewClient(conn *net.UDPConn) *Client {
-	codecFunc := codec.NewCodecFuncMap[defaultCodecType]
+	codecFunc := NewCodecFuncMap[DefaultCodecType]
 	client := &Client{
 		seq:     1, // seq starts with 1, 0 means invalid call
 		conn:    conn,
@@ -165,7 +164,7 @@ func NewClient(conn *net.UDPConn) *Client {
 		pending: sync.Map{},
 	}
 	go client.receive()
-	go client.retry()
+	// go client.retry()
 	return client
 }
 
@@ -195,10 +194,9 @@ func (client *Client) send(seq uint64, call *Call) {
 	defer client.sending.Unlock()
 
 	// prepare request header
-	var header codec.Header
+	var header Header
 	header.ServiceMethod = call.ServiceMethod
 	header.Seq = seq
-	header.Error = ""
 
 	// encode and send the request
 	data, err := client.cc.Encode(&header, call.Args)
@@ -212,14 +210,14 @@ func (client *Client) send(seq uint64, call *Call) {
 		}
 		return
 	}
-	call.Attempts++
+	// call.Attempts++
 	// simulate packet loss
 	// rand.Float64 generates a float64 f: 0.0 <= f < 1.0
-	if rand.Float64() < NetworkPacketLossProbability {
-		log.Printf("packet seq %d is lost", header.Seq)
-		return
-	}
-
+	// if rand.Float64() < NetworkPacketLossProbability {
+	// 	log.Printf("packet seq %d is lost", header.Seq)
+	// 	return
+	// }
+	// log.Printf("sending packet %d...", header.Seq)
 	_, err = client.conn.Write(data)
 	if err != nil {
 		call := client.removeCall(seq)

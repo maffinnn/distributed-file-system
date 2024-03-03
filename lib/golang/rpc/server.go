@@ -3,18 +3,10 @@ package rpc
 import (
 	"errors"
 	"log"
-	"math/rand"
 	"net"
 	"reflect"
 	"strings"
 	"sync"
-
-	"distributed-file-system/lib/golang/rpc/codec"
-)
-
-const (
-	defaultCodecType = codec.GobType
-	maxBufferSize    = 1024 * 50
 )
 
 // Accept accepts connections on the listener and serves requests
@@ -26,14 +18,14 @@ func Register(rcvr interface{}) error { return DefaultServer.Register(rcvr) }
 
 // Server represents an RPC Server.
 type Server struct {
-	cc         codec.Codec
+	cc         Codec
 	serviceMap sync.Map
 	close      chan struct{}
 }
 
 // NewServer returns a new Server.
 func NewServer() *Server {
-	codecFunc := codec.NewCodecFuncMap[defaultCodecType]
+	codecFunc := NewCodecFuncMap[DefaultCodecType]
 	return &Server{
 		cc:    codecFunc(),
 		close: make(chan struct{}),
@@ -81,12 +73,14 @@ func (server *Server) Accept(conn *net.UDPConn) {
 			log.Printf("rpc server: closing connection...")
 			return
 		default:
-			buf := make([]byte, maxBufferSize)
+			buf := make([]byte, MaxBufferSize)
 			n, addr, err := conn.ReadFromUDP(buf)
 			if err != nil {
 				log.Println("rpc server: read udp error:", err)
 				return
 			}
+
+			// fmt.Printf("server reads from udp socket %d bytes\n", n)
 			go server.ServeConn(conn, addr, buf[:n])
 		}
 	}
@@ -116,23 +110,26 @@ var invalidRequest = struct{}{}
 
 // request stores all information of a call
 type request struct {
-	h            *codec.Header // header of request
+	h            *Header       // header of request
 	argv, replyv reflect.Value // argv and replyv of request
 	mtype        *methodType   // type of request
 	svc          *service
 }
 
 func (server *Server) readRequest(data []byte) (*request, error) {
-	var m codec.Message
+	var m Message
 	err := server.cc.Decode(data, &m)
 	if err != nil {
+		log.Printf("server readRequest: decode error: %v", err)
 		return nil, err
 	}
+	// log.Print("server readRequest: %+v", m)
 	req := &request{h: &m.Header}
 	req.svc, req.mtype, err = server.findService(m.Header.ServiceMethod)
 	if err != nil {
 		return req, err
 	}
+
 	req.argv = req.mtype.newArgv()
 	req.replyv = req.mtype.newReplyv()
 	// make sure that argvi is a pointer, ReadBody need a pointer as parameter
@@ -154,7 +151,7 @@ func (server *Server) handleRequest(conn *net.UDPConn, addr *net.UDPAddr, req *r
 	server.sendResponse(conn, addr, req.h, req.replyv.Interface())
 }
 
-func (server *Server) sendResponse(conn *net.UDPConn, addr *net.UDPAddr, h *codec.Header, body interface{}) {
+func (server *Server) sendResponse(conn *net.UDPConn, addr *net.UDPAddr, h *Header, body interface{}) {
 	data, err := server.cc.Encode(h, body)
 	if err != nil {
 		log.Println("rpc server: encode response error:", err)
@@ -163,9 +160,9 @@ func (server *Server) sendResponse(conn *net.UDPConn, addr *net.UDPAddr, h *code
 
 	// simulate packet loss
 	// rand.Float64 generates a float64 f: 0.0 <= f < 1.0
-	if rand.Float64() < NetworkPacketLossProbability {
-		return
-	}
+	// if rand.Float64() < NetworkPacketLossProbability {
+	// 	return
+	// }
 
 	_, err = conn.WriteToUDP(data, addr)
 	if err != nil {

@@ -109,12 +109,15 @@ func (server *Server) ServeConn(conn *net.UDPConn, addr *net.UDPAddr, data []byt
 		return
 	}
 	// check for request duplication
-	if v, ok := server.processed.Load(req.h.Seq); ok {
-		// exists
-		log.Printf("rpc server: duplicated request %d, sending from cached result.\n", req.h.Seq)
-		c := v.(*cachedResponse)
-		server.sendResponse(conn, addr, req.h, c.replyv.Interface())
-		return
+	if FilterDuplicatedRequest {
+		v, ok := server.processed.Load(req.h.Seq)
+		if ok {
+			// exists
+			log.Printf("rpc server: duplicated request %d, sending from cached result.\n", req.h.Seq)
+			c := v.(*cachedResponse)
+			server.sendResponse(conn, addr, req.h, c.replyv.Interface())
+			return
+		}
 	}
 	server.handleRequest(conn, addr, req)
 }

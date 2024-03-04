@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"distributed-file-system/lib/golang/config"
 	"distributed-file-system/lib/golang/rpc"
 )
 
@@ -278,11 +277,11 @@ func (fs *FileServer) Remove(req RemoveRequest, resp *RemoveResponse) error {
 	return nil
 }
 
-func NewFileServer(config *config.Config) *FileServer {
+func NewFileServer(addr string) *FileServer {
 	exportedRootPaths := os.Getenv("EXPORT_ROOT_PATHS")
 	paths := strings.Split(exportedRootPaths, ":")
 	fs := &FileServer{
-		addr:              config.RemoteAddr,
+		addr:              addr,
 		exportedRootPaths: paths,
 		fileIndexTrees:    make(map[string]*FileDescriptor),
 	}

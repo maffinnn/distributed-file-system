@@ -9,7 +9,11 @@ import (
 )
 
 type Config struct {
-	RemoteAddr string `yaml:"serverAddr"`
+	ServerAddr string `yaml:"serverAddr"`
+}
+
+func NewConfig() *Config {
+	return &Config{}
 }
 
 func GetConfig() *Config {

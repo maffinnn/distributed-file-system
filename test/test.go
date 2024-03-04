@@ -3,12 +3,13 @@ package main
 import (
 	"fmt"
 	"log"
-	"os"
 	"time"
 
 	"distributed-file-system/lib/golang/config"
 	"distributed-file-system/lib/golang/service"
 )
+
+var serverAddr string = ":8080"
 
 func Senario1(c1, c2 *service.FileClient) {
 	var fdC1, fdC2 *service.FileDescriptor
@@ -121,8 +122,8 @@ func Senario2(c1, c2 *service.FileClient) {
 }
 
 func TestCacheConsistencyAFSSenario1(conf *config.Config) {
-	c1 := service.NewFileClient("1", ":8081", conf)
-	c2 := service.NewFileClient("2", ":8082", conf)
+	c1 := service.NewFileClient("1", ":8081", serverAddr)
+	c2 := service.NewFileClient("2", ":8082", serverAddr)
 	go c1.Run()
 	go c2.Run()
 	c1.Mount("etc/exports/mockdir1", "1", service.AndrewFileSystemType)
@@ -131,8 +132,8 @@ func TestCacheConsistencyAFSSenario1(conf *config.Config) {
 }
 
 func TestCacheConsistencyAFSSenario2(conf *config.Config) {
-	c1 := service.NewFileClient("1", ":8081", conf)
-	c2 := service.NewFileClient("2", ":8082", conf)
+	c1 := service.NewFileClient("1", ":8081", serverAddr)
+	c2 := service.NewFileClient("2", ":8082", serverAddr)
 	go c1.Run()
 	go c2.Run()
 	c1.Mount("etc/exports/mockdir1", "1", service.AndrewFileSystemType)
@@ -141,8 +142,8 @@ func TestCacheConsistencyAFSSenario2(conf *config.Config) {
 }
 
 func TestCacheConsistencyNFSSenario1(conf *config.Config) {
-	c1 := service.NewFileClient("1", ":8081", conf)
-	c2 := service.NewFileClient("2", ":8082", conf)
+	c1 := service.NewFileClient("1", ":8081", serverAddr)
+	c2 := service.NewFileClient("2", ":8082", serverAddr)
 	go c1.Run()
 	go c2.Run()
 	c1.Mount("etc/exports/mockdir1", "1", service.SunNetworkFileSystemType)
@@ -151,8 +152,8 @@ func TestCacheConsistencyNFSSenario1(conf *config.Config) {
 }
 
 func TestCacheConsistencyNFSSenario2(conf *config.Config) {
-	c1 := service.NewFileClient("1", ":8081", conf)
-	c2 := service.NewFileClient("2", ":8082", conf)
+	c1 := service.NewFileClient("1", ":8081", serverAddr)
+	c2 := service.NewFileClient("2", ":8082", serverAddr)
 	go c1.Run()
 	go c2.Run()
 	c1.Mount("etc/exports/mockdir1", "1", service.SunNetworkFileSystemType)
@@ -161,11 +162,9 @@ func TestCacheConsistencyNFSSenario2(conf *config.Config) {
 }
 
 func main() {
-	pwd, _ := os.Getwd()
-	log.Println(pwd)
 	conf := config.GetConfig()
-	log.Println(conf)
-	server := service.NewFileServer(config.GetConfig())
+	// log.Println(conf)
+	server := service.NewFileServer(serverAddr)
 	go server.Run()
 	TestCacheConsistencyAFSSenario2(conf)
 }

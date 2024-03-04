@@ -11,13 +11,12 @@ import (
 	"sync"
 	"time"
 
-	"distributed-file-system/lib/golang/config"
 	"distributed-file-system/lib/golang/rpc"
 )
 
 var (
-	duration     int           = 30
-	pollInterval time.Duration = 10 * time.Millisecond
+	Duration     int = 30 // in seconds
+	PollInterval int = 10 // in miliseconds
 )
 
 type FileClient struct {
@@ -30,7 +29,7 @@ type FileClient struct {
 	cache     *Cache
 }
 
-func NewFileClient(id, addr string, config *config.Config) *FileClient {
+func NewFileClient(id, addr, serverAddr string) *FileClient {
 	fc := &FileClient{
 		id:      id,
 		addr:    addr,
@@ -43,7 +42,7 @@ func NewFileClient(id, addr string, config *config.Config) *FileClient {
 		log.Fatalf("file client rpc register error: %v", err)
 		return nil
 	}
-	rpcClient, err := rpc.Dial(config.RemoteAddr)
+	rpcClient, err := rpc.Dial(serverAddr)
 	if err != nil {
 		log.Fatalf("file client rpc dial error: %v", err)
 	}
@@ -87,7 +86,7 @@ func (fc *FileClient) Mount(src, target string, fstype FileSystemType) error {
 		go fc.poll()
 	}
 	// duration <= 0 means mount forever, the files will be mounted until client explicitly call unmount
-	if duration > 0 {
+	if Duration > 0 {
 		go fc.monitor(src, target)
 	}
 	return nil
@@ -113,13 +112,14 @@ func (fc *FileClient) mountRecursive(root *FileDescriptor, filepath string, fsty
 }
 
 func (fc *FileClient) monitor(src, target string) error {
-	<-time.After(time.Duration(duration) * time.Second)
+	<-time.After(time.Duration(Duration) * time.Second)
 	fc.stop <- struct{}{}
 	log.Printf("[file client %s]: timeout, unmounting file: %s", fc.id, target)
 	return fc.Unmount(src, target)
 }
 
 func (fc *FileClient) poll() {
+	freshnessPeriod := time.Duration(PollInterval) * time.Millisecond
 	for {
 		select {
 		case <-fc.stop:
@@ -132,7 +132,7 @@ func (fc *FileClient) poll() {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					if now.Sub(entry.lastValidated) < pollInterval {
+					if now.Sub(entry.lastValidated) < freshnessPeriod {
 						return // consider valid
 					}
 					getArgs := &GetAttributeRequest{ClientId: fc.id, FilePath: filepath}
@@ -274,6 +274,9 @@ func (fc *FileClient) Read(fd *FileDescriptor, n int) ([]byte, error) {
 	cached, _ := fc.cache.Get(fd.Filepath)
 	// update last read end position
 	lastOffset := int(fd.Seeker)
+	if lastOffset >= cached.Len() {
+		return nil, fmt.Errorf("EOF has reached")
+	}
 	fd.Seeker = uint64(min(lastOffset+n, cached.Len()))
 	return cached.Bytes()[lastOffset:int(fd.Seeker)], nil
 }

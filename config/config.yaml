@@ -1,1 +1,8 @@
 serverAddr: :8080
+clientAddrs: 
+  - :8081
+  - :8082
+pollIntervalInMiliSecond: 10
+retryLimit: 10
+timeoutInMiliSecond: 10
+NetworkPacketLossProbability: 0.0

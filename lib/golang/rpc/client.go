@@ -5,16 +5,18 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"math/rand"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
-const (
-	retry                        uint64        = 7
-	timeout                      time.Duration = 10 * time.Millisecond
-	NetworkPacketLossProbability float64       = 0.0
+var (
+	RetryLimit                   uint64        = 7
+	Timeout                      time.Duration = 10 * time.Millisecond
+	NetworkPacketLossProbability float64       = 0.7
 )
 
 func init() {
@@ -23,8 +25,8 @@ func init() {
 
 // Call represents an active RPC.
 type Call struct {
-	Attempts         uint64    // count number of attempts made
-	LastTryTimestamp time.Time // timestamp for last retry attempt
+	Attempts         atomic.Uint64 // count number of attempts made
+	LastTryTimestamp time.Time     // timestamp for last retry attempt
 	Seq              uint64
 	ServiceMethod    string      // format "<service>.<method>"
 	Args             interface{} // arguments to the function
@@ -90,6 +92,9 @@ func (client *Client) removeCall(seq uint64) *Call {
 	client.mu.Lock()
 	defer client.mu.Unlock()
 	v, _ := client.pending.LoadAndDelete(seq)
+	if v == nil {
+		return nil
+	}
 	return v.(*Call)
 }
 
@@ -108,14 +113,15 @@ func (client *Client) terminateCalls(err error) {
 }
 
 func (client *Client) retry() {
+	RetryLimit = math.MaxUint64 // retry until success
 	for {
 		client.pending.Range(func(key, value interface{}) bool {
 			call := value.(*Call)
-			if call.Attempts >= retry {
+			if call.Attempts.Load() >= RetryLimit {
 				client.terminateCalls(fmt.Errorf("rpc client packet %d lost due to poor internet connection", call.Seq))
 				return true
 			}
-			if time.Since(call.LastTryTimestamp) >= timeout {
+			if time.Since(call.LastTryTimestamp) >= Timeout {
 				// try again
 				client.send(call.Seq, call)
 			}
@@ -137,6 +143,7 @@ func (client *Client) receive() {
 		if err != nil {
 			log.Printf("rpc client: error decode the message: %v", err)
 		}
+		log.Printf("rpc client response for packet seq %d is received.\n", m.Header.Seq)
 		h := m.Header
 		call := client.removeCall(h.Seq)
 		switch {
@@ -164,7 +171,7 @@ func NewClient(conn *net.UDPConn) *Client {
 		pending: sync.Map{},
 	}
 	go client.receive()
-	// go client.retry()
+	go client.retry()
 	return client
 }
 
@@ -210,13 +217,13 @@ func (client *Client) send(seq uint64, call *Call) {
 		}
 		return
 	}
-	// call.Attempts++
+	call.Attempts.Add(1)
 	// simulate packet loss
 	// rand.Float64 generates a float64 f: 0.0 <= f < 1.0
-	// if rand.Float64() < NetworkPacketLossProbability {
-	// 	log.Printf("packet seq %d is lost", header.Seq)
-	// 	return
-	// }
+	if rand.Float64() < NetworkPacketLossProbability {
+		log.Printf("rpc client: packet seq %d is sent but lost.", header.Seq)
+		return
+	}
 	// log.Printf("sending packet %d...", header.Seq)
 	_, err = client.conn.Write(data)
 	if err != nil {
@@ -243,7 +250,6 @@ func (client *Client) Go(serviceMethod string, args, reply interface{}, done cha
 		ServiceMethod:    serviceMethod,
 		Args:             args,
 		Reply:            reply,
-		Attempts:         0,
 		LastTryTimestamp: time.Now(),
 		Done:             done,
 	}

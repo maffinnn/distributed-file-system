@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"log"
 	"os"
@@ -10,18 +9,6 @@ import (
 	"distributed-file-system/lib/golang/config"
 	"distributed-file-system/lib/golang/service"
 )
-
-func run() {
-	scanner := bufio.NewScanner(os.Stdin)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "q" {
-			log.Printf("Exiting the program")
-			break
-		}
-		log.Println(line)
-	}
-}
 
 func Senario1(c1, c2 *service.FileClient) {
 	var fdC1, fdC2 *service.FileDescriptor

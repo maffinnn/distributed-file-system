@@ -53,14 +53,14 @@ func TestRPC() {
 	rpc.RegisterType(Args{})
 	rpc.RegisterType(Reply{})
 	var wg sync.WaitGroup
-	for i := 0; i < 5; i++ {
+	for i := 1; i <= 5; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
 			args := &Args{Num1: int64(i), Num2: int64(i * i)}
 			var reply Reply
-			if err := client.Call("Foo.Mount", args, &reply); err != nil {
-				fmt.Println("call Foo.Mount error:", err)
+			if err := client.Call("Foo.Sum", args, &reply); err != nil {
+				fmt.Println("call Foo.Sum error:", err)
 				return
 			}
 			fmt.Printf("client: %d + %d = %d\n", args.Num1, args.Num2, reply.Num)

@@ -3,10 +3,17 @@ package rpc
 import (
 	"errors"
 	"log"
+	"math/rand"
 	"net"
 	"reflect"
 	"strings"
 	"sync"
+	"time"
+)
+
+var (
+	FilterDuplicatedRequest bool          = true
+	CacheValidityPeriod     time.Duration = 30 * time.Second
 )
 
 // Accept accepts connections on the listener and serves requests
@@ -20,16 +27,20 @@ func Register(rcvr interface{}) error { return DefaultServer.Register(rcvr) }
 type Server struct {
 	cc         Codec
 	serviceMap sync.Map
+	mu         sync.Mutex
+	processed  sync.Map
 	close      chan struct{}
 }
 
 // NewServer returns a new Server.
 func NewServer() *Server {
 	codecFunc := NewCodecFuncMap[DefaultCodecType]
-	return &Server{
+	s := &Server{
 		cc:    codecFunc(),
 		close: make(chan struct{}),
 	}
+	go s.backgroundCleanUp()
+	return s
 }
 
 // DefaultServer is the default instance of *Server.
@@ -80,7 +91,6 @@ func (server *Server) Accept(conn *net.UDPConn) {
 				return
 			}
 
-			// fmt.Printf("server reads from udp socket %d bytes\n", n)
 			go server.ServeConn(conn, addr, buf[:n])
 		}
 	}
@@ -96,6 +106,14 @@ func (server *Server) ServeConn(conn *net.UDPConn, addr *net.UDPAddr, data []byt
 		}
 		req.h.Error = err.Error()
 		server.sendResponse(conn, addr, req.h, invalidRequest)
+		return
+	}
+	// check for request duplication
+	if v, ok := server.processed.Load(req.h.Seq); ok {
+		// exists
+		log.Printf("rpc server: duplicated request %d, sending from cached result.\n", req.h.Seq)
+		c := v.(*cachedResponse)
+		server.sendResponse(conn, addr, req.h, c.replyv.Interface())
 		return
 	}
 	server.handleRequest(conn, addr, req)
@@ -116,6 +134,11 @@ type request struct {
 	svc          *service
 }
 
+type cachedResponse struct {
+	timestamp time.Time     // timestamp
+	replyv    reflect.Value // replyv
+}
+
 func (server *Server) readRequest(data []byte) (*request, error) {
 	var m Message
 	err := server.cc.Decode(data, &m)
@@ -123,7 +146,7 @@ func (server *Server) readRequest(data []byte) (*request, error) {
 		log.Printf("server readRequest: decode error: %v", err)
 		return nil, err
 	}
-	// log.Print("server readRequest: %+v", m)
+	log.Printf("rpc server: packet seq %d is received\n", m.Header.Seq)
 	req := &request{h: &m.Header}
 	req.svc, req.mtype, err = server.findService(m.Header.ServiceMethod)
 	if err != nil {
@@ -148,6 +171,8 @@ func (server *Server) handleRequest(conn *net.UDPConn, addr *net.UDPAddr, req *r
 		server.sendResponse(conn, addr, req.h, invalidRequest)
 		return
 	}
+	// store the request result
+	server.processed.Store(req.h.Seq, &cachedResponse{time.Now(), req.replyv})
 	server.sendResponse(conn, addr, req.h, req.replyv.Interface())
 }
 
@@ -160,13 +185,31 @@ func (server *Server) sendResponse(conn *net.UDPConn, addr *net.UDPAddr, h *Head
 
 	// simulate packet loss
 	// rand.Float64 generates a float64 f: 0.0 <= f < 1.0
-	// if rand.Float64() < NetworkPacketLossProbability {
-	// 	return
-	// }
+	if rand.Float64() < NetworkPacketLossProbability {
+		log.Printf("rpc server: packet seq %d is sent but lost.", h.Seq)
+		return
+	}
 
 	_, err = conn.WriteToUDP(data, addr)
 	if err != nil {
 		log.Println("rpc server: write response error:", err)
 		return
+	}
+}
+
+func (server *Server) backgroundCleanUp() {
+	for {
+		select {
+		case <-server.close:
+			return
+		default:
+			server.processed.Range(func(key, value interface{}) bool {
+				c := value.(*cachedResponse)
+				if time.Since(c.timestamp) > CacheValidityPeriod {
+					server.processed.LoadAndDelete(key)
+				}
+				return true
+			})
+		}
 	}
 }

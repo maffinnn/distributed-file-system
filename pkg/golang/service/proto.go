@@ -14,6 +14,7 @@ type MountRequest struct {
 type MountResponse struct {
 	IsDir           bool   //indicating if the requested file path is a directory
 	FilePath        string // the relative file path at the client side
+	Size            int64  // the size of the file
 	ChildrenPaths   string // list of children of the requested file path, concatenated into a string
 	LastModified    int64  // last modification time at the server side
 	CallbackPromise bool   // callback promise used in Andrew File System; true means this callback promise is valid
@@ -39,8 +40,8 @@ type CreateResponse struct {
 }
 
 type ReadRequest struct {
-	ClientId string
 	FilePath string
+	N        int64
 }
 
 type ReadResponse struct {
@@ -84,7 +85,19 @@ type GetAttributeRequest struct {
 type GetAttributeResponse struct {
 	IsDir        bool
 	FilePath     string
+	FileSeeker   int64
 	LastModified int64 // to synchronize the last modified timestamp at the server side
+}
+
+type UpdateAttributeRequest struct {
+	ClientId            string
+	FilePath            string
+	FileSeekerIncrement int64
+}
+
+type UpdateAttributeResponse struct {
+	IsSuccess          bool
+	FileSeekerPosition int64
 }
 
 func init() {
@@ -94,6 +107,8 @@ func init() {
 	rpc.RegisterType(UnmountResponse{})
 	rpc.RegisterType(CreateRequest{})
 	rpc.RegisterType(CreateResponse{})
+	rpc.RegisterType(UpdateAttributeRequest{})
+	rpc.RegisterType(UpdateAttributeResponse{})
 	rpc.RegisterType(ReadRequest{})
 	rpc.RegisterType(ReadResponse{})
 	rpc.RegisterType(RemoveRequest{})

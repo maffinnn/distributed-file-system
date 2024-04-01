@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"distributed-file-system/pkg/golang/rpc"
 	"distributed-file-system/pkg/golang/service"
 	"flag"
 	"fmt"
@@ -14,13 +15,14 @@ func main() {
 	id := flag.String("clientId", "1", "ID of the client")
 	addr := flag.String("addr", ":8081", "client address")
 	serverAddr := flag.String("serverAddr", ":8080", "server address to connect to")
+	networkPacketLossProbability := flag.Int("networkLossProb", 0, "")
 	flag.Parse()
+	rpc.ClientSideNetworkPacketLossProbability = *networkPacketLossProbability
 	c := service.NewFileClient(*id, *addr, *serverAddr)
 	fmt.Println(*id, *addr, *serverAddr)
 	go c.Run()
 
-	fmt.Printf("Starting file client %s...\n", *id)
-	fmt.Printf("> ")
+	fmt.Printf("Starting file client %s...\n> ", *id)
 	scanner := bufio.NewScanner(os.Stdin)
 	var err error
 	var fd *service.FileDescriptor
@@ -33,9 +35,9 @@ func main() {
 		}
 		cmd := strings.TrimSpace(words[0])
 		switch cmd {
-		case "mount": // mount path/to/source/dir/at/server path/to/target/dir/at/client --filesystemtype=e.g.AFS,SNFS --duration(in seconds)=30 --pollInterval(in miliseconds)=10
-			if len(words) < 5 {
-				fmt.Printf("ERROR: invalid input")
+		case "mount": // mount path/to/source/dir/at/server path/to/target/dir/at/client filesystemtype=e.g.AFS,SNFS
+			if len(words) != 4 {
+				fmt.Printf("ERROR: invalid arguement")
 				continue
 			}
 			srcDir := strings.TrimSpace(words[1])
@@ -48,19 +50,8 @@ func main() {
 			}
 			if fstype == "AFS" {
 				fs = service.AndrewFileSystemType
-			} else if len(words) != 6 {
-				fmt.Printf("ERROR: Sun Network File System is chosen but freshness interval is set.\n")
-				continue
 			} else {
 				fs = service.SunNetworkFileSystemType
-				// if user opts to sun network file system, user also nees to specify the freshness interval for cache consistency
-				// otherwise a default value of 30 seconds would be used
-				service.PollInterval, _ = strconv.Atoi(strings.TrimSpace(words[5]))
-			}
-			service.Duration, err = strconv.Atoi(strings.TrimSpace(words[4]))
-			if err != nil {
-				fmt.Printf("ERROR: %v", err)
-				continue
 			}
 			c.Mount(srcDir, targetDir, fs)
 		case "open":
@@ -91,7 +82,7 @@ func main() {
 			c.Read(fd, n)
 		case "write":
 			if len(words) != 3 {
-				fmt.Printf("ERROR: invalid inpu\n")
+				fmt.Printf("ERROR: invalid input\n")
 				continue
 			}
 			if fd == nil {

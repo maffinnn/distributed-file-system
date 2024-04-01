@@ -31,13 +31,13 @@ type FileClient struct {
 
 func NewFileClient(id, addr, serverAddr string) *FileClient {
 	fc := &FileClient{
-		id:      id,
-		addr:    addr,
-		stop:    make(chan struct{}),
-		volumes: make(map[string]*Volume),
-		cache:   NewCache(),
+		id:        id,
+		addr:      addr,
+		stop:      make(chan struct{}),
+		volumes:   make(map[string]*Volume),
+		cache:     NewCache(),
+		rpcServer: rpc.NewServer(),
 	}
-	fc.rpcServer = rpc.NewServer()
 	if err := fc.rpcServer.Register(fc); err != nil {
 		log.Fatalf("file client rpc register error: %v", err)
 		return nil
@@ -75,7 +75,7 @@ func (fc *FileClient) Mount(src, target string, fstype FileSystemType) error {
 		return fmt.Errorf("[file client %s]: call FileServer.Mount error: %v", fc.id, err)
 	}
 	log.Printf("[file client %s]: %s is mounted at %v", fc.id, src, target)
-	root := NewFileDescriptor(reply.IsDir, reply.FilePath)
+	root := NewFileDescriptor(reply.IsDir, reply.FilePath, uint64(reply.Size))
 	childrenPaths := strings.Split(reply.ChildrenPaths, ":")
 	for _, cp := range childrenPaths {
 		fc.mountRecursive(root, cp, fstype)
@@ -104,7 +104,7 @@ func (fc *FileClient) mountRecursive(root *FileDescriptor, filepath string, fsty
 	}
 	var reply MountResponse
 	_ = fc.rpcClient.Call("FileServer.Mount", args, &reply)
-	fd := NewFileDescriptor(reply.IsDir, reply.FilePath)
+	fd := NewFileDescriptor(reply.IsDir, reply.FilePath, uint64(reply.Size))
 	root.Children = append(root.Children, fd)
 	childrenPaths := strings.Split(reply.ChildrenPaths, ":")
 	for _, cp := range childrenPaths {
@@ -116,7 +116,7 @@ func (fc *FileClient) monitor(src, target string) error {
 	<-time.After(time.Duration(Duration) * time.Second)
 	fc.stop <- struct{}{}
 	log.Printf("[file client %s]: timeout, unmounting file: %s", fc.id, target)
-	return fc.Unmount(src, target)
+	return fc.unmount(src, target)
 }
 
 func (fc *FileClient) poll() {
@@ -150,7 +150,7 @@ func (fc *FileClient) poll() {
 						return
 					}
 					// invalidated the entry
-					readArgs := &ReadRequest{ClientId: fc.id, FilePath: fd.Filepath}
+					readArgs := &ReadRequest{FilePath: fd.Filepath}
 					var readReply ReadResponse
 					if err := fc.rpcClient.Call("FileServer.Read", readArgs, &readReply); err != nil {
 						log.Printf("call FileServer.Read error: %v", err)
@@ -169,7 +169,7 @@ func (fc *FileClient) poll() {
 
 // user facing method
 // ummoun the specified `target` file path
-func (fc *FileClient) Unmount(src, target string) error {
+func (fc *FileClient) unmount(src, target string) error {
 	args := &UnmountRequest{FilePath: src, ClientId: fc.id}
 	var reply UnmountResponse
 	if err := fc.rpcClient.Call("FileServer.Unmount", args, &reply); err != nil {
@@ -195,7 +195,7 @@ func (fc *FileClient) Create(localPath string) (*FileDescriptor, error) {
 		return nil, fmt.Errorf("[file client %s]: call FileServer.Create error: %v", fc.id, err)
 	}
 
-	fd := NewFileDescriptor(false, fp.Join(v.root.Filepath, filepathSuffix))
+	fd := NewFileDescriptor(false, fp.Join(v.root.Filepath, filepathSuffix), 0)
 	fd.LastModified = reply.LastModified
 	AddToTree(v.root, fd)
 	return fd, nil
@@ -231,7 +231,7 @@ func (fc *FileClient) Open(localPath string) (*FileDescriptor, error) {
 
 // user facing method
 // Idempotent Read Operation:
-// stateless read operation, does not change the seeker position of the file descriptor
+// stateless read operation, does not change the seeker position of the file descriptor both at the server and client side
 // Note: provIded file must be a single file not a directory
 func (fc *FileClient) ReadAt(fd *FileDescriptor, offset, n int) ([]byte, error) {
 	if fd == nil {
@@ -250,17 +250,16 @@ func (fc *FileClient) ReadAt(fd *FileDescriptor, offset, n int) ([]byte, error) 
 		}
 		fc.cache.Set(fd.Filepath, reply.Data)
 	}
-
 	cached, _ := fc.cache.Get(fd.Filepath)
-	if offset >= cached.Len() {
+	if offset > cached.Len() {
 		return nil, fmt.Errorf("invalid read: offset exceeds the file length")
 	}
 	return cached.Bytes()[offset:min(offset+n, cached.Len())], nil
 }
 
 // user facing method
-// Non-Idempotent Read: read from last seek position recorded at client sIde fd
-// Note: provIded file must be a single file not a directory
+// Non-Idempotent Read: read from last seek position recorded at server side
+// Note: provided file must be a single file not a directory
 func (fc *FileClient) Read(fd *FileDescriptor, n int) ([]byte, error) {
 	if fd == nil {
 		return nil, fmt.Errorf("invalid read operation, filedescriptor is null")
@@ -280,17 +279,19 @@ func (fc *FileClient) Read(fd *FileDescriptor, n int) ([]byte, error) {
 	}
 
 	cached, _ := fc.cache.Get(fd.Filepath)
-	// update last read end position
-	lastOffset := int(fd.Seeker)
-	if lastOffset >= cached.Len() {
-		return nil, fmt.Errorf("EOF has reached")
+	args := &UpdateAttributeRequest{ClientId: fc.id, FilePath: fd.Filepath, FileSeekerIncrement: int64(n)}
+	var reply UpdateAttributeResponse
+	if err := fc.rpcClient.Call("FileServer.UpdateAttribute", args, &reply); err != nil {
+		return nil, fmt.Errorf("call FileServer.UpdateAttribute error: %v", err)
 	}
-	fd.Seeker = uint64(min(lastOffset+n, cached.Len()))
-	return cached.Bytes()[lastOffset:int(fd.Seeker)], nil
+	// update last read end position
+	position := int(reply.FileSeekerPosition)
+	fmt.Printf("last file seeker position at client: %d\n", position)
+	return cached.Bytes()[position:int(position+n)], nil
 }
 
 // user facing method
-// perform Idempotent write operation at the given file descriptor location
+// nonidempotent write operation at the given file descriptor location
 func (fc *FileClient) Write(fd *FileDescriptor, offset int, data []byte) (int, error) {
 	if fd == nil {
 		return 0, fmt.Errorf("invalid write operation, filedescriptor is null")
@@ -310,7 +311,7 @@ func (fc *FileClient) Write(fd *FileDescriptor, offset int, data []byte) (int, e
 		fc.cache.Set(fd.Filepath, reply.Data)
 	}
 	cached, _ := fc.cache.Get(fd.Filepath)
-	if offset >= cached.Len() {
+	if offset > cached.Len() {
 		return 0, fmt.Errorf("invalid write: offset exceeds the file length")
 	}
 	copy := &bytes.Buffer{}
@@ -367,29 +368,6 @@ func (fc *FileClient) Close(fd *FileDescriptor) {
 }
 
 // user facing method
-// removes the file from the server side
-func (fc *FileClient) Remove(fd *FileDescriptor) error {
-	if fd == nil {
-		return fmt.Errorf("invalid remove operation, filedescriptor is null")
-	}
-	args := &RemoveRequest{ClientId: fc.id, FilePath: fd.Filepath}
-	var reply RemoveResponse
-	if err := fc.rpcClient.Call("FileServer.Remove", args, &reply); err != nil {
-		return fmt.Errorf("[file client %s]: call FileSever.Remove error: %v", fc.id, err)
-	}
-	// search all the volumnes
-	for _, v := range fc.volumes {
-		found := Search(v.root, fd.Filepath)
-		if found != nil {
-			log.Printf("reply: remove status %v", reply.IsRemoved)
-			RemoveFromTree(v.root, fd.Filepath)
-			return nil
-		}
-	}
-	return fmt.Errorf("[file client %s] error removing the file", fc.id)
-}
-
-// user facing method
 // to display all the mounted files
 func (fc *FileClient) ListAllFiles() {
 	fmt.Printf("local file tree:\n")
@@ -438,36 +416,3 @@ func (fc *FileClient) Shutdown() {
 	fc.stop <- struct{}{}
 	fc.rpcServer.Shutdown()
 }
-
-// func (fc *FileClient) MakeDir(dir string) error {
-// 	mountPoint, err := fc.checkMountingPoint(dir)
-// 	if err != nil {
-// 		return fmt.Errorf("[file client %s]: %v", fc.id, err)
-// 	}
-// 	fd := fc.mountedFiles[mountPoint]
-// 	suffix := strings.TrimPrefix(dir, mountPoint)
-// 	args := &CreateRequest{FilePath: filepath.Join(fd.FilePath, suffix)}
-// 	var reply CreateResponse
-// 	if err := fc.rpcClient.Call("FileServer.MkDir", args, &reply); err != nil {
-// 		return fmt.Errorf("[file client %s]: call FileServer.MkDir error: %v", fc.id, err)
-// 	}
-// 	AddToTree(fd, reply.Fd)
-// 	return nil
-// }
-
-// func (fc *FileClient) RemoveDir(dir string) error {
-// 	mountPoint, err := fc.checkMountingPoint(dir)
-// 	if err != nil {
-// 		return fmt.Errorf("[file client %s]: %v", fc.id, err)
-// 	}
-// 	fd := fc.mountedFiles[mountPoint]
-// 	suffix := strings.TrimPrefix(dir, mountPoint)
-// 	args := &RemoveRequest{FilePath: filepath.Join(fd.FilePath, suffix)}
-// 	var reply RemoveResponse
-// 	if err := fc.rpcClient.Call("FileServer.RmDir", args, &reply); err != nil {
-// 		return fmt.Errorf("[file client %s]: call FileServer.RmDir error: %v", fc.id, err)
-// 	}
-// 	// remove the fd from the tree
-// 	RemoveFromTree(fd, filepath.Join(fd.FilePath, suffix))
-// 	return nil
-// }

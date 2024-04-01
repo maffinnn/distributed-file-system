@@ -1,6 +1,0 @@
-insert on friday by c2
-insert on friday by c1
-insert on friday by c1
-insert on friday by c1
-Hello
-EOF

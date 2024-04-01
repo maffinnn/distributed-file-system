@@ -19,7 +19,7 @@ func NewVolume(root *FileDescriptor, fstype FileSystemType) *Volume {
 type FileDescriptor struct {
 	IsDir           bool
 	Filepath        string // server-side path to the file
-	owner           string // owner of the file
+	Size            uint64 // size of the file
 	Seeker          uint64 // last seek position, only used at client side
 	Children        []*FileDescriptor
 	subscription    *Subscription    // list of client ids that are subscribe to this file descriptor
@@ -27,10 +27,11 @@ type FileDescriptor struct {
 	CallbackPromise *CallbackPromise // callback promise for andrew filesystem, used at client side
 }
 
-func NewFileDescriptor(isDir bool, filepath string) *FileDescriptor {
+func NewFileDescriptor(isDir bool, filepath string, size uint64) *FileDescriptor {
 	return &FileDescriptor{
 		IsDir:    isDir,
 		Filepath: filepath,
+		Size:     size,
 		Seeker:   0,
 		Children: make([]*FileDescriptor, 0),
 	}

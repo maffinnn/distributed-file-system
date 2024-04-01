@@ -14,14 +14,10 @@ import (
 )
 
 var (
-	RetryLimit                   uint64        = 7
-	Timeout                      time.Duration = 10 * time.Millisecond
-	NetworkPacketLossProbability float64       = 0.7
+	RetryLimit                             uint64        = math.MaxUint64 // retry until success
+	Timeout                                time.Duration = 10 * time.Millisecond
+	ClientSideNetworkPacketLossProbability int           = 50
 )
-
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
 
 // Call represents an active RPC.
 type Call struct {
@@ -113,7 +109,6 @@ func (client *Client) terminateCalls(err error) {
 }
 
 func (client *Client) retry() {
-	RetryLimit = math.MaxUint64 // retry until success
 	for {
 		client.pending.Range(func(key, value interface{}) bool {
 			call := value.(*Call)
@@ -137,13 +132,14 @@ func (client *Client) receive() {
 		n, _, err := client.conn.ReadFromUDP(buf)
 		if err != nil {
 			log.Printf("rpc client: error reading from UDP: %v", err)
+			continue
 		}
 		var m Message
 		err = client.cc.Decode(buf[:n], &m)
 		if err != nil {
 			log.Printf("rpc client: error decode the message: %v", err)
 		}
-		log.Printf("rpc client response for packet seq %d is received.\n", m.Header.Seq)
+		// log.Printf("rpc client response for packet seq %d is received.\n", m.Header.Seq)
 		h := m.Header
 		call := client.removeCall(h.Seq)
 		switch {
@@ -217,13 +213,17 @@ func (client *Client) send(seq uint64, call *Call) {
 		}
 		return
 	}
+
 	call.Attempts.Add(1)
 	// simulate packet loss
-	// rand.Float64 generates a float64 f: 0.0 <= f < 1.0
-	if rand.Float64() < NetworkPacketLossProbability {
-		log.Printf("rpc client: packet seq %d is sent but lost.", header.Seq)
+	r := rand.Intn(100)
+	if r < ClientSideNetworkPacketLossProbability {
+		if LogInfo {
+			log.Printf("rpc client: packet seq %d is sent but lost.", header.Seq)
+		}
 		return
 	}
+
 	// log.Printf("sending packet %d...", header.Seq)
 	_, err = client.conn.Write(data)
 	if err != nil {
@@ -266,7 +266,7 @@ func (client *Client) Go(serviceMethod string, args, reply interface{}, done cha
 	return call
 }
 
-// Call invokes the named function, waits for it to complete,
+// synchronous Call invokes the named function, waits for it to complete,
 // and returns its error status.
 func (client *Client) Call(serviceMethod string, args, reply interface{}) error {
 	call := <-client.Go(serviceMethod, args, reply, make(chan *Call, 1)).Done

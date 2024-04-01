@@ -13,8 +13,10 @@ import (
 )
 
 var (
-	FilterDuplicatedRequest bool          = true
-	CacheValidityPeriod     time.Duration = 30 * time.Second
+	FilterDuplicatedRequest                bool          = true
+	CacheValidityPeriod                    time.Duration = 30 * time.Second
+	ServerSideNetworkPacketLossProbability int           = 50
+	LogInfo                                bool          = true
 )
 
 // Accept accepts connections on the listener and serves requests
@@ -90,7 +92,6 @@ func (server *Server) Accept(conn *net.UDPConn) {
 				log.Println("rpc server: read udp error:", err)
 				return
 			}
-
 			go server.ServeConn(conn, addr, buf[:n])
 		}
 	}
@@ -99,6 +100,7 @@ func (server *Server) Accept(conn *net.UDPConn) {
 // ServeConn runs the server on a single connection.
 // ServeConn blocks, serving the connection until the client hangs up.
 func (server *Server) ServeConn(conn *net.UDPConn, addr *net.UDPAddr, data []byte) {
+
 	req, err := server.readRequest(data)
 	if err != nil {
 		if req == nil {
@@ -108,13 +110,16 @@ func (server *Server) ServeConn(conn *net.UDPConn, addr *net.UDPAddr, data []byt
 		server.sendResponse(conn, addr, req.h, invalidRequest)
 		return
 	}
+	// log.Printf("rpc server: packet seq %d from %s has been received\n", req.h.Seq)
 	// check for request duplication
 	if FilterDuplicatedRequest {
-		id := fmt.Sprintf("%s-%d", conn.RemoteAddr().String(), req.h.Seq)
+		id := fmt.Sprintf("%s-%d", addr.String(), req.h.Seq)
 		v, ok := server.processed.Load(id)
 		if ok {
 			// exists
-			log.Printf("rpc server: duplicated request %d, sending from cached result.\n", req.h.Seq)
+			if LogInfo {
+				log.Printf("rpc server: duplicated request %d, sending from cached result.\n", req.h.Seq)
+			}
 			c := v.(*cachedResponse)
 			server.sendResponse(conn, addr, req.h, c.replyv.Interface())
 			return
@@ -150,7 +155,7 @@ func (server *Server) readRequest(data []byte) (*request, error) {
 		log.Printf("server readRequest: decode error: %v", err)
 		return nil, err
 	}
-	log.Printf("rpc server: packet seq %d is received\n", m.Header.Seq)
+
 	req := &request{h: &m.Header}
 	req.svc, req.mtype, err = server.findService(m.Header.ServiceMethod)
 	if err != nil {
@@ -176,7 +181,7 @@ func (server *Server) handleRequest(conn *net.UDPConn, addr *net.UDPAddr, req *r
 		return
 	}
 	// store the request result
-	id := fmt.Sprintf("%s-%d", conn.RemoteAddr().String(), req.h.Seq)
+	id := fmt.Sprintf("%s-%d", addr.String(), req.h.Seq)
 	server.processed.Store(id, &cachedResponse{time.Now(), req.replyv})
 	server.sendResponse(conn, addr, req.h, req.replyv.Interface())
 }
@@ -189,9 +194,11 @@ func (server *Server) sendResponse(conn *net.UDPConn, addr *net.UDPAddr, h *Head
 	}
 
 	// simulate packet loss
-	// rand.Float64 generates a float64 f: 0.0 <= f < 1.0
-	if rand.Float64() < NetworkPacketLossProbability {
-		log.Printf("rpc server: packet seq %d is sent but lost.", h.Seq)
+	r := rand.Intn(100)
+	if r < ServerSideNetworkPacketLossProbability {
+		if LogInfo {
+			log.Printf("rpc server: packet seq %d is sent but lost.", h.Seq)
+		}
 		return
 	}
 

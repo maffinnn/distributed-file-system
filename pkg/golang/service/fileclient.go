@@ -15,7 +15,7 @@ import (
 )
 
 var (
-	Duration     int = 30 // in seconds
+	Duration     int = 0  // in seconds, default will mount the volume forever
 	PollInterval int = 10 // in miliseconds
 )
 

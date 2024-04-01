@@ -28,7 +28,7 @@ func senario1(c1, c2 *service.FileClient) {
 	// client 2 opens the file
 	fdC2, err = c2.Open("2/testcreate3.txt")
 	if err != nil {
-		log.Println(err)
+		log.Fatal(err)
 	}
 	// client 2 updates the file
 	data, err = c2.ReadAt(fdC2, 0, 1000)
@@ -36,7 +36,7 @@ func senario1(c1, c2 *service.FileClient) {
 		log.Fatal(err)
 	}
 	fmt.Printf("\nReading 2/testcreate3.txt...\n\n%s\n\n", string(data))
-	n, err := c2.Write(fdC2, 0, []byte("insert on friday by c2\n"))
+	n, err := c2.Write(fdC2, 0, []byte("insert on monday by c2\n"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -59,8 +59,8 @@ func senario1(c1, c2 *service.FileClient) {
 	}
 	fmt.Printf("\nReading 1/testcreate3.txt...\n\n%s\n\n", string(data))
 
-	// client 2 updates the file once again
-	n, err = c2.Write(fdC2, 0, []byte("insert on friday by c2 again\n"))
+	// client 2 updates the file again
+	n, err = c2.Write(fdC2, 0, []byte("insert on monday by c2 again\n"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -96,8 +96,9 @@ func senario2(c1, c2 *service.FileClient) {
 		log.Fatal(err)
 	}
 	fmt.Printf("\nReading 1/testcreate2.txt...\n\n%s\n\n", string(data))
+
 	// client 2 updates the file and close
-	n, err := c2.Write(fdC2, 0, []byte("insert on friday by c2\n"))
+	n, err := c2.Write(fdC2, 0, []byte("insert on monday by c2\n"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -106,7 +107,7 @@ func senario2(c1, c2 *service.FileClient) {
 
 	time.Sleep(2 * time.Second)
 	// client 1 updates the file
-	n, err = c1.Write(fdC1, 0, []byte("insert on friday by c1\n"))
+	n, err = c1.Write(fdC1, 0, []byte("insert on monday by c1\n"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -170,6 +171,8 @@ func TestCacheConsistencyNFSSenario1() {
 	rpc.ClientSideNetworkPacketLossProbability = 0
 	rpc.Timeout = 100 * time.Millisecond
 
+	service.PollInterval = 10 // in milliseconds
+
 	server := service.NewFileServer(serverAddr)
 	go server.Run()
 
@@ -190,6 +193,7 @@ func TestCacheConsistencyNFSSenario2() {
 	rpc.ServerSideNetworkPacketLossProbability = 0
 	rpc.ClientSideNetworkPacketLossProbability = 0
 	rpc.Timeout = 100 * time.Millisecond
+	service.PollInterval = 10 // in milliseconds
 
 	server := service.NewFileServer(serverAddr)
 	go server.Run()
@@ -309,5 +313,5 @@ func AtMostOnceNonIdempotentRead() {
 	performNonIdempotentRead()
 }
 func main() {
-	TestCacheConsistencyNFSSenario1()
+	TestCacheConsistencyAFSSenario2()
 }

@@ -2,7 +2,7 @@ package main
 
 import (
 	"bufio"
-	"distributed-file-system/lib/golang/service"
+	"distributed-file-system/pkg/golang/service"
 	"flag"
 	"fmt"
 	"os"

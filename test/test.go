@@ -5,8 +5,8 @@ import (
 	"log"
 	"time"
 
-	"distributed-file-system/lib/golang/config"
-	"distributed-file-system/lib/golang/service"
+	"distributed-file-system/pkg/golang/config"
+	"distributed-file-system/pkg/golang/service"
 )
 
 var serverAddr string = ":8080"
@@ -163,7 +163,6 @@ func TestCacheConsistencyNFSSenario2(conf *config.Config) {
 
 func main() {
 	conf := config.GetConfig()
-	// log.Println(conf)
 	server := service.NewFileServer(serverAddr)
 	go server.Run()
 	TestCacheConsistencyAFSSenario2(conf)

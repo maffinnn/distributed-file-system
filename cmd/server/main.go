@@ -1,7 +1,7 @@
 package main
 
 import (
-	"distributed-file-system/lib/golang/service"
+	"distributed-file-system/pkg/golang/service"
 	"flag"
 )
 

@@ -7,7 +7,6 @@ import (
 	"os"
 	fp "path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"distributed-file-system/pkg/golang/logger"
@@ -129,42 +128,39 @@ func (fc *FileClient) poll() {
 			return
 		default:
 			// check for all cached(open) file
-			var wg sync.WaitGroup
 			now := time.Now()
-			for filepath, entry := range fc.cache.cc {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					if now.Sub(entry.lastValidated) < freshnessPeriod {
-						return // consider valid
-					}
-					getArgs := &GetAttributeRequest{ClientId: fc.id, FilePath: filepath}
-					var getReply GetAttributeResponse
-					if err := fc.rpcClient.Call("FileServer.GetAttribute", getArgs, &getReply); err != nil {
-						fc.logger.Printf("ERROR [file client %s]: call FileServer.GetAttribute error: %v", fc.id, err)
-						return
-					}
-					_, fd, _ := fc.find(filepath)
-					lastModifiedAtServer := getReply.LastModified
-					if lastModifiedAtServer == fd.LastModified {
-						// no change at the server, update the lastValidated timestamp
-						entry.lastValidated = now
-						return
-					}
-					// invalidated the entry
-					readArgs := &ReadRequest{FilePath: fd.Filepath}
-					var readReply ReadResponse
-					if err := fc.rpcClient.Call("FileServer.Read", readArgs, &readReply); err != nil {
-						fc.logger.Printf("ERROR [file client %s]: call FileServer.Read error: %v", fc.id, err)
-						return
-					}
-					entry.Reset()
-					entry.Write(readReply.Data)
+			fc.cache.Range(func(key, value interface{}) bool {
+				filepath := key.(string)
+				entry := value.(*Entry)
+				if now.Sub(entry.lastValidated) < freshnessPeriod {
+					return true // consider valid
+				}
+				getArgs := &GetAttributeRequest{ClientId: fc.id, FilePath: filepath}
+				var getReply GetAttributeResponse
+				if err := fc.rpcClient.Call("FileServer.GetAttribute", getArgs, &getReply); err != nil {
+					fc.logger.Printf("ERROR [file client %s]: call FileServer.GetAttribute error: %v", fc.id, err)
+					return true
+				}
+				_, fd, _ := fc.find(filepath)
+				lastModifiedAtServer := getReply.LastModified
+				if lastModifiedAtServer == fd.LastModified {
+					// no change at the server, update the lastValidated timestamp
 					entry.lastValidated = now
-					entry.dirty = false
-				}()
-			}
-			wg.Wait()
+					return true
+				}
+				// invalidated the entry
+				readArgs := &ReadRequest{FilePath: fd.Filepath}
+				var readReply ReadResponse
+				if err := fc.rpcClient.Call("FileServer.Read", readArgs, &readReply); err != nil {
+					fc.logger.Printf("ERROR [file client %s]: call FileServer.Read error: %v", fc.id, err)
+					return true
+				}
+				entry.Reset()
+				entry.Write(readReply.Data)
+				entry.lastValidated = now
+				entry.dirty = false
+				return true
+			})
 		}
 	}
 }

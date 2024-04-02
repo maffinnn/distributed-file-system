@@ -3,33 +3,37 @@ package service
 import (
 	"bytes"
 	"fmt"
+	"sync"
 	"time"
 )
 
 type Cache struct {
-	cc map[string]*Entry
+	mu sync.Mutex
+	sync.Map
 }
 
 func NewCache() *Cache {
-	return &Cache{
-		cc: make(map[string]*Entry),
-	}
+	return &Cache{}
 }
 
 func (c *Cache) Set(key string, value []byte) (int, error) {
-	if _, ok := c.cc[key]; !ok {
-		c.cc[key] = NewEntry()
-	} else {
-		c.cc[key].Reset()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry := NewEntry()
+	n, err := entry.Write(value)
+	if err != nil {
+		return 0, err
 	}
-	return c.cc[key].Write(value)
+	c.Store(key, entry)
+	return n, nil
 }
 
 func (c *Cache) Get(key string) (*Entry, error) {
-	if _, ok := c.cc[key]; !ok {
+	v, ok := c.Load(key)
+	if !ok {
 		return nil, fmt.Errorf("invalid cache key %s", key)
 	}
-	return c.cc[key], nil
+	return v.(*Entry), nil
 }
 
 type Entry struct {

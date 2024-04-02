@@ -1,7 +1,7 @@
 package main
 
 import (
-	"distributed-file-system/lib/golang/rpc"
+	"distributed-file-system/pkg/golang/rpc"
 	"fmt"
 	"log"
 	"net"

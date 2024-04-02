@@ -3,8 +3,8 @@ package rpc
 import (
 	"bytes"
 	"encoding/gob"
+	"fmt"
 	"go/ast"
-	"log"
 	"reflect"
 )
 
@@ -56,16 +56,16 @@ type service struct {
 	method map[string]*methodType // map of the services that the object is registering
 }
 
-func newService(rcvr interface{}) *service {
+func newService(rcvr interface{}) (*service, error) {
 	s := new(service)
 	s.rcvr = reflect.ValueOf(rcvr)
 	s.name = reflect.Indirect(s.rcvr).Type().Name()
 	s.typ = reflect.TypeOf(rcvr)
 	if !ast.IsExported(s.name) {
-		log.Fatalf("rpc server: %s is not a valid service name", s.name)
+		return nil, fmt.Errorf("rpc server: %s is not a valid service name", s.name)
 	}
 	s.registerMethods()
-	return s
+	return s, nil
 }
 
 func (s *service) registerMethods() {

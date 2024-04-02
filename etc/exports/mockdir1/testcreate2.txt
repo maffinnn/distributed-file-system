@@ -1,3 +1,2 @@
-insert on monday by c1
 Hello
 EOF

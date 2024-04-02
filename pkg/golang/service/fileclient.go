@@ -3,7 +3,6 @@ package service
 import (
 	"bytes"
 	"fmt"
-	"log"
 	"net"
 	"os"
 	fp "path/filepath"
@@ -11,12 +10,13 @@ import (
 	"sync"
 	"time"
 
+	"distributed-file-system/pkg/golang/logger"
 	"distributed-file-system/pkg/golang/rpc"
 )
 
 var (
-	Duration     int = 0  // in seconds, default will mount the volume forever
-	PollInterval int = 10 // in miliseconds
+	Duration     int = 0   // in seconds, default will mount the volume forever
+	PollInterval int = 100 // in miliseconds
 )
 
 type FileClient struct {
@@ -27,24 +27,26 @@ type FileClient struct {
 	stop      chan struct{}
 	volumes   map[string]*Volume // file index for mounted files
 	cache     *Cache
+	logger    *logger.Logger
 }
 
 func NewFileClient(id, addr, serverAddr string) *FileClient {
+	logger := logger.NewLogger(fmt.Sprintf("./client%s.log", id))
 	fc := &FileClient{
 		id:        id,
 		addr:      addr,
 		stop:      make(chan struct{}),
 		volumes:   make(map[string]*Volume),
 		cache:     NewCache(),
-		rpcServer: rpc.NewServer(),
+		logger:    logger,
+		rpcServer: rpc.NewServer(logger),
 	}
 	if err := fc.rpcServer.Register(fc); err != nil {
-		log.Fatalf("file client rpc register error: %v", err)
-		return nil
+		panic(fmt.Sprintf("file client rpc register error: %v", err))
 	}
-	rpcClient, err := rpc.Dial(serverAddr)
+	rpcClient, err := rpc.Dial(serverAddr, logger)
 	if err != nil {
-		log.Fatalf("file client rpc dial error: %v", err)
+		panic(fmt.Sprintf("file client rpc dial error: %v", err))
 	}
 	fc.rpcClient = rpcClient
 	return fc
@@ -53,13 +55,13 @@ func NewFileClient(id, addr, serverAddr string) *FileClient {
 func (fc *FileClient) Run() {
 	s, err := net.ResolveUDPAddr("udp", fc.addr)
 	if err != nil {
-		log.Fatal("client error resolving udp address: ", err)
+		panic(fmt.Sprintf("client error resolving udp address: %v", err))
 	}
 	conn, err := net.ListenUDP("udp", s)
 	if err != nil {
-		log.Fatal("network error:", err)
+		panic(fmt.Sprintf("network error: %v", err))
 	}
-	log.Printf("[file client %s]: listening on %s", fc.id, conn.LocalAddr().String())
+	fc.logger.Printf("INFO [file client %s]: listening on %s", fc.id, conn.LocalAddr().String())
 	fc.rpcServer.Accept(conn)
 }
 
@@ -74,7 +76,7 @@ func (fc *FileClient) Mount(src, target string, fstype FileSystemType) error {
 	if err := fc.rpcClient.Call("FileServer.Mount", args, &reply); err != nil {
 		return fmt.Errorf("[file client %s]: call FileServer.Mount error: %v", fc.id, err)
 	}
-	log.Printf("[file client %s]: %s is mounted at %v", fc.id, src, target)
+	fc.logger.Printf("INFO [file client %s]: %s is mounted at %v", fc.id, src, target)
 	root := NewFileDescriptor(reply.IsDir, reply.FilePath, uint64(reply.Size))
 	childrenPaths := strings.Split(reply.ChildrenPaths, ":")
 	for _, cp := range childrenPaths {
@@ -115,7 +117,7 @@ func (fc *FileClient) mountRecursive(root *FileDescriptor, filepath string, fsty
 func (fc *FileClient) monitor(src, target string) error {
 	<-time.After(time.Duration(Duration) * time.Second)
 	fc.stop <- struct{}{}
-	log.Printf("[file client %s]: timeout, unmounting file: %s", fc.id, target)
+	fc.logger.Printf("INFO [file client %s]: timeout, unmounting file: %s", fc.id, target)
 	return fc.unmount(src, target)
 }
 
@@ -139,7 +141,7 @@ func (fc *FileClient) poll() {
 					getArgs := &GetAttributeRequest{ClientId: fc.id, FilePath: filepath}
 					var getReply GetAttributeResponse
 					if err := fc.rpcClient.Call("FileServer.GetAttribute", getArgs, &getReply); err != nil {
-						log.Printf("[file client %s]: call FileServer.GetAttribute error: %v", fc.id, err)
+						fc.logger.Printf("ERROR [file client %s]: call FileServer.GetAttribute error: %v", fc.id, err)
 						return
 					}
 					_, fd, _ := fc.find(filepath)
@@ -153,7 +155,7 @@ func (fc *FileClient) poll() {
 					readArgs := &ReadRequest{FilePath: fd.Filepath}
 					var readReply ReadResponse
 					if err := fc.rpcClient.Call("FileServer.Read", readArgs, &readReply); err != nil {
-						log.Printf("call FileServer.Read error: %v", err)
+						fc.logger.Printf("ERROR [file client %s]: call FileServer.Read error: %v", fc.id, err)
 						return
 					}
 					entry.Reset()
@@ -286,7 +288,8 @@ func (fc *FileClient) Read(fd *FileDescriptor, n int) ([]byte, error) {
 	}
 	// update last read end position
 	position := int(reply.FileSeekerPosition)
-	fmt.Printf("last file seeker position at client: %d\n", position)
+
+	fmt.Printf("\033[33;1mLast file seeker position at client: %d\n\033[0m", position)
 	return cached.Bytes()[position:int(position+n)], nil
 }
 
@@ -331,7 +334,7 @@ func (fc *FileClient) Write(fd *FileDescriptor, offset int, data []byte) (int, e
 			args := &WriteRequest{ClientId: fc.id, FilePath: fd.Filepath, Data: cached.Bytes()}
 			var reply WriteResponse
 			if err := fc.rpcClient.Call("FileServer.Write", args, &reply); err != nil {
-				log.Printf("call FileServer.Write error: %v", err)
+				fc.logger.Printf("ERROR [file client %s] call FileServer.Write error: %v", fc.id, err)
 				return 0, err
 			} else {
 				cached.dirty = false
@@ -361,7 +364,7 @@ func (fc *FileClient) Close(fd *FileDescriptor) {
 	args := &WriteRequest{ClientId: fc.id, FilePath: fd.Filepath, Data: cached.Bytes()}
 	var reply WriteResponse
 	if err := fc.rpcClient.Call("FileServer.Write", args, &reply); err != nil {
-		log.Printf("call FileServer.Write error: %v", err)
+		fc.logger.Printf("ERROR [file client %s] call FileServer.Write error: %v", fc.id, err)
 		return
 	}
 	cached.dirty = false
@@ -370,7 +373,7 @@ func (fc *FileClient) Close(fd *FileDescriptor) {
 // user facing method
 // to display all the mounted files
 func (fc *FileClient) ListAllFiles() {
-	fmt.Printf("local file tree:\n")
+	fmt.Printf("[file client %s] local file tree:\n", fc.id)
 	for root, v := range fc.volumes {
 		PrintTree(root, v.root)
 	}
@@ -381,10 +384,10 @@ func (fc *FileClient) ListAllFiles() {
 func (fc *FileClient) ListFiles(path string) {
 	mountPoint, err := fc.checkMountingPoint(path)
 	if err != nil {
-		log.Printf("[file client %s]: %v", fc.id, err)
+		fc.logger.Printf("ERROR [file client %s]: %v", fc.id, err)
 		return
 	}
-	fmt.Printf("local file tree:\n")
+	fmt.Printf("[file client %s] local file tree:\n", fc.id)
 	v := fc.volumes[mountPoint]
 	PrintTree(path, v.root)
 }
@@ -392,7 +395,7 @@ func (fc *FileClient) ListFiles(path string) {
 // server facing method i.e. rpc
 // an endpoint to allow server to update the callback promise
 func (fc *FileClient) UpdateCallbackPromise(req UpdateCallbackPromiseRequest, resp *UpdateCallbackPromiseResponse) error {
-	log.Printf("FileClient.UpdateCallbackPromise is called")
+	fc.logger.Printf("INFO [file client %s] FileClient.UpdateCallbackPromise is called", fc.id)
 	_, fd, _ := fc.find(req.FilePath)
 	if fd == nil || fd.CallbackPromise == nil {
 		return nil

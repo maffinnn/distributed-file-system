@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"distributed-file-system/pkg/golang/config"
 	"distributed-file-system/pkg/golang/rpc"
 	"distributed-file-system/pkg/golang/service"
 	"flag"
@@ -9,17 +10,50 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
+var serverAddr = ":8080"
+
 func main() {
-	id := flag.String("clientId", "1", "ID of the client")
-	addr := flag.String("addr", ":8081", "client address")
-	serverAddr := flag.String("serverAddr", ":8080", "server address to connect to")
-	networkPacketLossProbability := flag.Int("networkLossProb", 0, "")
+
+	id := flag.String("id", "1", "id of the client")
+	addr := flag.String("addr", ":8081", "address of the client")
+	s := flag.String("setting", "AtLeastOnceIdempotent", "")
 	flag.Parse()
-	rpc.ClientSideNetworkPacketLossProbability = *networkPacketLossProbability
-	c := service.NewFileClient(*id, *addr, *serverAddr)
-	fmt.Println(*id, *addr, *serverAddr)
+
+	settings := map[string]config.Config{
+		"AtLeastOnceIdempotent": {
+			ClientSideNetworkPacketLossProbability: 20,
+			RpcTimeout:                             100 * time.Millisecond,
+		},
+		"AtLeastOnceNonIdempotent": {
+			ClientSideNetworkPacketLossProbability: 0,
+			RpcTimeout:                             750 * time.Millisecond,
+		},
+		"AtMostOnceIdempotent": {
+			ClientSideNetworkPacketLossProbability: 10,
+			RpcTimeout:                             200 * time.Millisecond,
+		},
+		"AtMostOnceNonIdempotentRead": {
+			ClientSideNetworkPacketLossProbability: 0,
+			RpcTimeout:                             800 * time.Millisecond,
+		},
+		"TestCacheConsistency": {
+			ClientSideNetworkPacketLossProbability: 0,
+			RpcTimeout:                             100 * time.Millisecond,
+		},
+	}
+
+	if conf, ok := settings[*s]; ok {
+		rpc.ClientSideNetworkPacketLossProbability = conf.ClientSideNetworkPacketLossProbability
+		rpc.Timeout = conf.RpcTimeout
+	} else {
+		fmt.Printf("error flag")
+		return
+	}
+
+	c := service.NewFileClient(*id, *addr, serverAddr)
 	go c.Run()
 
 	fmt.Printf("Starting file client %s...\n> ", *id)
@@ -96,10 +130,8 @@ func main() {
 				fmt.Printf("ERROR: %v\n", err)
 			}
 			fmt.Printf("%d bytes written to %s\n", n, fd.Filepath)
-		case "touch":
 		case "ls":
 			c.ListAllFiles()
-		case "help":
 		case "quit":
 			fmt.Printf("Exiting the program...")
 			return

@@ -1,9 +1,8 @@
 package rpc
 
 import (
-	"errors"
+	"distributed-file-system/pkg/golang/logger"
 	"fmt"
-	"log"
 	"math/rand"
 	"net"
 	"reflect"
@@ -12,47 +11,45 @@ import (
 	"time"
 )
 
+// default setting
 var (
 	FilterDuplicatedRequest                bool          = true
-	CacheValidityPeriod                    time.Duration = 30 * time.Second
+	CacheValidityPeriod                    time.Duration = 3 * time.Minute
 	ServerSideNetworkPacketLossProbability int           = 50
-	LogInfo                                bool          = true
+	randomNumberGenerator                                = rand.New(rand.NewSource(50))
 )
-
-// Accept accepts connections on the listener and serves requests
-// for each incoming connection.
-func Accept(conn *net.UDPConn) { DefaultServer.Accept(conn) }
-
-// Register publishes the receiver's methods in the DefaultServer.
-func Register(rcvr interface{}) error { return DefaultServer.Register(rcvr) }
 
 // Server represents an RPC Server.
 type Server struct {
+	receiving  sync.Mutex // guard for receiving
+	sending    sync.Mutex // guard for sending
 	cc         Codec
 	serviceMap sync.Map // to store the registered service
 	processed  sync.Map // processed message store
 	close      chan struct{}
+	logger     *logger.Logger
 }
 
 // NewServer returns a new Server.
-func NewServer() *Server {
+func NewServer(logger *logger.Logger) *Server {
 	codecFunc := NewCodecFuncMap[DefaultCodecType]
 	s := &Server{
-		cc:    codecFunc(),
-		close: make(chan struct{}),
+		cc:     codecFunc(),
+		close:  make(chan struct{}),
+		logger: logger,
 	}
 	go s.backgroundCleanUp()
 	return s
 }
 
-// DefaultServer is the default instance of *Server.
-var DefaultServer = NewServer()
-
 // Register publishes in the server the set of methods of the
 func (server *Server) Register(rcvr interface{}) error {
-	s := newService(rcvr)
+	s, err := newService(rcvr)
+	if err != nil {
+		return err
+	}
 	if _, dup := server.serviceMap.LoadOrStore(s.name, s); dup {
-		return errors.New("rpc: service already defined: " + s.name)
+		return fmt.Errorf("rpc: service already defined: %s ", s.name)
 	}
 	return nil
 }
@@ -60,19 +57,19 @@ func (server *Server) Register(rcvr interface{}) error {
 func (server *Server) findService(serviceMethod string) (svc *service, mtype *methodType, err error) {
 	dot := strings.LastIndex(serviceMethod, ".")
 	if dot < 0 {
-		err = errors.New("rpc server: service/method request ill-formed: " + serviceMethod)
+		err = fmt.Errorf("rpc server: service/method request ill-formed: %s", serviceMethod)
 		return
 	}
 	serviceName, methodName := serviceMethod[:dot], serviceMethod[dot+1:]
 	svci, ok := server.serviceMap.Load(serviceName)
 	if !ok {
-		err = errors.New("rpc server: can't find service " + serviceName)
+		err = fmt.Errorf("rpc server: can't find service %s", serviceName)
 		return
 	}
 	svc = svci.(*service)
 	mtype = svc.method[methodName]
 	if mtype == nil {
-		err = errors.New("rpc server: can't find method " + methodName)
+		err = fmt.Errorf("rpc server: can't find method %s", methodName)
 	}
 	return
 }
@@ -83,13 +80,13 @@ func (server *Server) Accept(conn *net.UDPConn) {
 	for {
 		select {
 		case <-server.close:
-			log.Printf("rpc server: closing connection...")
+			server.logger.Printf("[INFO] rpc server: closing connection...")
 			return
 		default:
 			buf := make([]byte, MaxBufferSize)
 			n, addr, err := conn.ReadFromUDP(buf)
 			if err != nil {
-				log.Println("rpc server: read udp error:", err)
+				server.logger.Printf("[ERROR] rpc server: read udp error: %V", err)
 				return
 			}
 			go server.ServeConn(conn, addr, buf[:n])
@@ -100,7 +97,6 @@ func (server *Server) Accept(conn *net.UDPConn) {
 // ServeConn runs the server on a single connection.
 // ServeConn blocks, serving the connection until the client hangs up.
 func (server *Server) ServeConn(conn *net.UDPConn, addr *net.UDPAddr, data []byte) {
-
 	req, err := server.readRequest(data)
 	if err != nil {
 		if req == nil {
@@ -110,6 +106,7 @@ func (server *Server) ServeConn(conn *net.UDPConn, addr *net.UDPAddr, data []byt
 		server.sendResponse(conn, addr, req.h, invalidRequest)
 		return
 	}
+
 	// log.Printf("rpc server: packet seq %d from %s has been received\n", req.h.Seq)
 	// check for request duplication
 	if FilterDuplicatedRequest {
@@ -117,9 +114,7 @@ func (server *Server) ServeConn(conn *net.UDPConn, addr *net.UDPAddr, data []byt
 		v, ok := server.processed.Load(id)
 		if ok {
 			// exists
-			if LogInfo {
-				log.Printf("rpc server: duplicated request %d, sending from cached result.\n", req.h.Seq)
-			}
+			server.logger.Printf("[INFO] rpc server: duplicated request %d, sending from cached result.\n", req.h.Seq)
 			c := v.(*cachedResponse)
 			server.sendResponse(conn, addr, req.h, c.replyv.Interface())
 			return
@@ -149,10 +144,12 @@ type cachedResponse struct {
 }
 
 func (server *Server) readRequest(data []byte) (*request, error) {
+	server.receiving.Lock()
+	defer server.receiving.Unlock()
 	var m Message
 	err := server.cc.Decode(data, &m)
 	if err != nil {
-		log.Printf("server readRequest: decode error: %v", err)
+		server.logger.Printf("[] server readRequest: decode error: %v", err)
 		return nil, err
 	}
 
@@ -187,24 +184,23 @@ func (server *Server) handleRequest(conn *net.UDPConn, addr *net.UDPAddr, req *r
 }
 
 func (server *Server) sendResponse(conn *net.UDPConn, addr *net.UDPAddr, h *Header, body interface{}) {
+	server.sending.Lock()
+	defer server.sending.Unlock()
 	data, err := server.cc.Encode(h, body)
 	if err != nil {
-		log.Println("rpc server: encode response error:", err)
+		server.logger.Printf("[ERROR] rpc server: encode response error: %v", err)
 		return
 	}
 
 	// simulate packet loss
-	r := rand.Intn(100)
-	if r < ServerSideNetworkPacketLossProbability {
-		if LogInfo {
-			log.Printf("rpc server: packet seq %d is sent but lost.", h.Seq)
-		}
+	if randomNumberGenerator.Intn(100) < ServerSideNetworkPacketLossProbability {
+		server.logger.Printf("[INFO] rpc server: packet seq %d is sent but lost.", h.Seq)
 		return
 	}
 
 	_, err = conn.WriteToUDP(data, addr)
 	if err != nil {
-		log.Println("rpc server: write response error:", err)
+		server.logger.Printf("[ERROR] rpc server: write response error: %v", err)
 		return
 	}
 }

@@ -206,7 +206,7 @@ func encodeString(w io.Writer, s string) {
 func encodeInt64(w io.Writer, i int64) {
 	var buf bytes.Buffer
 	if err := binary.Write(&buf, binary.LittleEndian, i); err != nil {
-		log.Println("rpc codec: corba error encoding message:", err)
+		log.Printf("[ERROR] rpc codec: error encoding message: %v", err)
 		return
 	}
 	lenbuf := make([]byte, 4)
@@ -218,7 +218,7 @@ func encodeInt64(w io.Writer, i int64) {
 func encodeBool(w io.Writer, b bool) {
 	var buf bytes.Buffer
 	if err := binary.Write(&buf, binary.LittleEndian, b); err != nil {
-		log.Println("rpc codec: corba error encoding message:", err)
+		log.Printf("[ERROR] rpc codec: error encoding message: %v", err)
 		return
 	}
 	lenbuf := make([]byte, 4)

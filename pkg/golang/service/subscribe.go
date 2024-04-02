@@ -1,15 +1,8 @@
 package service
 
 import (
+	"distributed-file-system/pkg/golang/logger"
 	"distributed-file-system/pkg/golang/rpc"
-	"log"
-)
-
-type Topic string
-
-const (
-	FileUpdateTopic      Topic = "FileUpdate"
-	DirectoryUpdateTopic Topic = "DirectoryUpdate"
 )
 
 // valid or cancelled
@@ -35,6 +28,7 @@ func (cp *CallbackPromise) Set(value bool) { cp.ValidOrCanceled = value }
 
 type Subscription struct {
 	Members map[string]*Subscriber // key is the clientid
+	logger  *logger.Logger         //
 }
 
 type Subscriber struct {
@@ -43,25 +37,13 @@ type Subscriber struct {
 }
 
 func (s *Subscriber) UpdateFile(args interface{}) {
-	conn, err := rpc.Dial(s.Addr)
-	if err != nil {
-		log.Printf("subscriber: rpc dial error: %v", err)
-		return
-	}
-	var reply UpdateCallbackPromiseResponse
-	if err := conn.Call("FileClient.UpdateCallbackPromise", args, &reply); err != nil {
-		log.Printf("call FileClient.UpdateCallbackPromise error: %v", err)
-		return
-	}
+
 }
 
-func (s *Subscriber) UpdateDirectory(args interface{}) {
-	// TODO:
-}
-
-func NewSubscription() *Subscription {
+func NewSubscription(logger *logger.Logger) *Subscription {
 	return &Subscription{
 		Members: make(map[string]*Subscriber),
+		logger:  logger,
 	}
 }
 
@@ -80,21 +62,20 @@ func (sub *Subscription) Unsubscribe(clientId string) {
 }
 
 // excludeId is the client to be excluded from this update
-func (sub *Subscription) Broadcast(excludeId string, topic Topic, args interface{}) {
-	switch topic {
-	case FileUpdateTopic:
-		for id, subscribers := range sub.Members {
-			if id == excludeId {
-				continue
-			}
-			subscribers.UpdateFile(args)
+func (sub *Subscription) Broadcast(excludeId string, args interface{}) {
+	for id, member := range sub.Members {
+		if id == excludeId {
+			continue
 		}
-	case DirectoryUpdateTopic:
-		for id, subscribers := range sub.Members {
-			if id == excludeId {
-				continue
-			}
-			subscribers.UpdateDirectory(args)
+		conn, err := rpc.Dial(member.Addr, sub.logger)
+		if err != nil {
+			sub.logger.Printf("[ERROR] subscriber: rpc dial error: %v", err)
+			return
+		}
+		var reply UpdateCallbackPromiseResponse
+		if err := conn.Call("FileClient.UpdateCallbackPromise", args, &reply); err != nil {
+			sub.logger.Printf("[ERROR] call FileClient.UpdateCallbackPromise error: %v", err)
+			return
 		}
 	}
 }

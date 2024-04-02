@@ -3,13 +3,13 @@ package service
 import (
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"distributed-file-system/pkg/golang/logger"
 	"distributed-file-system/pkg/golang/rpc"
 )
 
@@ -18,6 +18,7 @@ type FileServer struct {
 	rpcServer         *rpc.Server
 	exportedRootPaths []string                   // top level directory path that the server is exporting
 	fileIndexTrees    map[string]*FileDescriptor // key: exported root path, value: fd, each fd must be independent of other
+	logger            *logger.Logger
 }
 
 // return the root, file path since the root, and error
@@ -75,7 +76,6 @@ func (fs *FileServer) Mount(req MountRequest, resp *MountResponse) error {
 
 // unmount will unsubscribe the requested client from the list
 func (fs *FileServer) Unmount(req UnmountRequest, resp *UnmountResponse) error {
-	log.Printf("FileServer.Unmount is called")
 	root, path, err := fs.find(req.FilePath)
 	if err != nil {
 		return fmt.Errorf("file server: %v", err)
@@ -103,7 +103,7 @@ func (fs *FileServer) GetAttribute(req GetAttributeRequest, resp *GetAttributeRe
 
 // updates the seeker position of the file descriptor
 func (fs *FileServer) UpdateAttribute(req UpdateAttributeRequest, resp *UpdateAttributeResponse) error {
-	// log.Printf("FileServer.UpdateAttribute is called")
+	fs.logger.Printf("INFO [file server] FileServer.UpdateAttribute is called")
 	root, path, err := fs.find(req.FilePath)
 	if err != nil {
 		return fmt.Errorf("file server: %v", err)
@@ -115,7 +115,8 @@ func (fs *FileServer) UpdateAttribute(req UpdateAttributeRequest, resp *UpdateAt
 		return fmt.Errorf("file server: invalid read, offset exceeds the file length")
 	}
 	resp.FileSeekerPosition = int64(fd.Seeker)
-	fmt.Printf("last file seeker position at server: %d\n", resp.FileSeekerPosition)
+
+	fmt.Printf("\033[33;1mLast file seeker position at server: %d\n\033[0m", resp.FileSeekerPosition)
 	// update the seeker position at server side
 	fd.Seeker = fd.Seeker + incr
 	resp.IsSuccess = true
@@ -124,7 +125,7 @@ func (fs *FileServer) UpdateAttribute(req UpdateAttributeRequest, resp *UpdateAt
 
 // idempotent operation
 func (fs *FileServer) Create(req CreateRequest, resp *CreateResponse) error {
-	// log.Printf("FileServer.Create is called")
+	fs.logger.Printf("INFO [file server] FileServer.Create is called")
 	parentDir := filepath.Dir(req.FilePath)
 	root, _, err := fs.find(parentDir)
 	if err != nil {
@@ -147,7 +148,7 @@ func (fs *FileServer) Create(req CreateRequest, resp *CreateResponse) error {
 			return fmt.Errorf("file server: create error %v", err)
 		}
 		fd := NewFileDescriptor(false, req.FilePath, 0)
-		fd.subscription = NewSubscription()
+		fd.subscription = NewSubscription(fs.logger)
 		fd.LastModified = time.Now().Unix()
 		// add to tree
 		pfd.AddChild(fd)
@@ -158,7 +159,7 @@ func (fs *FileServer) Create(req CreateRequest, resp *CreateResponse) error {
 }
 
 func (fs *FileServer) Read(req ReadRequest, resp *ReadResponse) error {
-	// log.Printf("FileServer.Read is called")
+	fs.logger.Printf("INFO [file server] FileServer.Read is called")
 	root, _, err := fs.find(req.FilePath)
 	if err != nil {
 		return err
@@ -176,7 +177,7 @@ func (fs *FileServer) Read(req ReadRequest, resp *ReadResponse) error {
 }
 
 func (fs *FileServer) Write(req WriteRequest, resp *WriteResponse) error {
-	// log.Printf("FileServer.Write is called")
+	fs.logger.Printf("INFO [file server] FileServer.Write is called")
 	root, _, err := fs.find(req.FilePath)
 	if err != nil {
 		return err
@@ -198,35 +199,37 @@ func (fs *FileServer) Write(req WriteRequest, resp *WriteResponse) error {
 		FilePath:          req.FilePath,
 		IsValidOrCanceled: false,
 	}
-	fd.subscription.Broadcast(req.ClientId, FileUpdateTopic, args)
+	fd.subscription.Broadcast(req.ClientId, args)
 	return nil
 }
 
 func NewFileServer(addr string) *FileServer {
 	exportedRootPaths := os.Getenv("EXPORT_ROOT_PATHS")
 	paths := strings.Split(exportedRootPaths, ":")
+	logger := logger.NewLogger("./server.log")
 	fs := &FileServer{
 		addr:              addr,
 		exportedRootPaths: paths,
 		fileIndexTrees:    make(map[string]*FileDescriptor),
-		rpcServer:         rpc.NewServer(),
+		logger:            logger,
+		rpcServer:         rpc.NewServer(logger),
 	}
 	for _, path := range paths {
-		fs.fileIndexTrees[path] = buildTree(path)
+		fs.fileIndexTrees[path] = fs.buildTree(path)
 	}
 	if err := fs.rpcServer.Register(fs); err != nil {
-		log.Fatal("rpc register error:", err)
+		panic(fmt.Sprintf("rpc register error: %v", err))
 	}
 	return fs
 }
 
-func buildTree(entry string) *FileDescriptor {
+func (fs *FileServer) buildTree(entry string) *FileDescriptor {
 	if entry == "" {
 		panic("no exported directories")
 	}
 	info, _ := os.Stat(entry)
 	root := NewFileDescriptor(info.IsDir(), "", uint64(info.Size()))
-	root.subscription = NewSubscription()
+	root.subscription = NewSubscription(fs.logger)
 	parents := make(map[string]*FileDescriptor)
 	parents[entry] = root
 	err := filepath.Walk(entry, func(currentPath string, info os.FileInfo, err error) error {
@@ -235,7 +238,7 @@ func buildTree(entry string) *FileDescriptor {
 		}
 		pfd := parents[filepath.Dir(currentPath)]
 		cfd := NewFileDescriptor(info.IsDir(), strings.TrimPrefix(currentPath, entry), uint64(info.Size()))
-		cfd.subscription = NewSubscription()
+		cfd.subscription = NewSubscription(fs.logger)
 		pfd.AddChild(cfd)
 		if _, ok := parents[currentPath]; !ok {
 			parents[currentPath] = cfd
@@ -252,12 +255,12 @@ func buildTree(entry string) *FileDescriptor {
 func (fs *FileServer) Run() {
 	s, err := net.ResolveUDPAddr("udp", fs.addr)
 	if err != nil {
-		log.Fatal("client error resolving udp address: ", err)
+		panic(fmt.Sprintf("server error resolving udp address: %v", err))
 	}
 	conn, err := net.ListenUDP("udp", s)
 	if err != nil {
-		log.Fatal("network error:", err)
+		panic(fmt.Sprintf("network error: %v", err))
 	}
-	log.Printf("[file server  ]: listening on %s", conn.LocalAddr().String())
+	fs.logger.Printf("INFO [file server]: listening on %s", conn.LocalAddr().String())
 	fs.rpcServer.Accept(conn)
 }

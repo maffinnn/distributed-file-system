@@ -1,18 +1,17 @@
 package rpc
 
 import (
-	"errors"
+	"distributed-file-system/pkg/golang/logger"
 	"fmt"
 	"io"
-	"log"
 	"math"
-	"math/rand"
 	"net"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
+// default setting
 var (
 	RetryLimit                             uint64        = math.MaxUint64 // retry until success
 	Timeout                                time.Duration = 10 * time.Millisecond
@@ -42,17 +41,18 @@ func (call *Call) done() {
 type Client struct {
 	conn     *net.UDPConn
 	cc       Codec
-	sending  sync.Mutex // protect following
+	sending  sync.Mutex // guard for sending the message
 	mu       sync.Mutex // protect following pending queue
-	seq      uint64     // latest sequence number for a new message
+	seq      uint64     // latest sequence number for a new message, initialize with 1
 	pending  sync.Map   // pending queue to store the messages
-	closing  bool       // user has called Close
+	logger   *logger.Logger
+	closing  bool // user has called Close
 	shutdown bool
 }
 
 var _ io.Closer = (*Client)(nil)
 
-var ErrShutdown = errors.New("connection is shut down")
+var ErrShutdown = fmt.Errorf("connection is shut down")
 
 // Close the connection
 func (client *Client) Close() error {
@@ -63,13 +63,6 @@ func (client *Client) Close() error {
 	}
 	client.closing = true
 	return client.conn.Close()
-}
-
-// IsAvailable return true if the client does work
-func (client *Client) IsAvailable() bool {
-	client.mu.Lock()
-	defer client.mu.Unlock()
-	return !client.shutdown && !client.closing
 }
 
 func (client *Client) registerCall(call *Call) (uint64, error) {
@@ -95,8 +88,8 @@ func (client *Client) removeCall(seq uint64) *Call {
 }
 
 func (client *Client) terminateCalls(err error) {
-	client.sending.Lock()
-	defer client.sending.Unlock()
+	// client.sending.Lock()
+	// defer client.sending.Unlock()
 	client.mu.Lock()
 	defer client.mu.Unlock()
 	client.shutdown = true
@@ -123,6 +116,7 @@ func (client *Client) retry() {
 			return true
 		})
 	}
+
 }
 
 func (client *Client) receive() {
@@ -131,13 +125,13 @@ func (client *Client) receive() {
 		buf := make([]byte, MaxBufferSize)
 		n, _, err := client.conn.ReadFromUDP(buf)
 		if err != nil {
-			log.Printf("rpc client: error reading from UDP: %v", err)
+			client.logger.Printf("[ERROR] rpc client: error reading from UDP: %v", err)
 			continue
 		}
 		var m Message
 		err = client.cc.Decode(buf[:n], &m)
 		if err != nil {
-			log.Printf("rpc client: error decode the message: %v", err)
+			client.logger.Printf("[ERROR] rpc client: error decode the message: %v", err)
 		}
 		// log.Printf("rpc client response for packet seq %d is received.\n", m.Header.Seq)
 		h := m.Header
@@ -147,7 +141,7 @@ func (client *Client) receive() {
 			// it usually means that Write partially failed
 			// and call was already removed.
 		case h.Error != "":
-			call.Error = errors.New(h.Error)
+			call.Error = fmt.Errorf(h.Error)
 			call.done()
 		default:
 			deepCopy(m.Body, call.Reply)
@@ -158,30 +152,32 @@ func (client *Client) receive() {
 	client.terminateCalls(err)
 }
 
-func NewClient(conn *net.UDPConn) *Client {
+func NewClient(conn *net.UDPConn, logger *logger.Logger) *Client {
 	codecFunc := NewCodecFuncMap[DefaultCodecType]
 	client := &Client{
 		seq:     1, // seq starts with 1, 0 means invalid call
 		conn:    conn,
 		cc:      codecFunc(),
 		pending: sync.Map{},
+		logger:  logger,
 	}
 	go client.receive()
 	go client.retry()
+
 	return client
 }
 
 // Dial connects to an RPC server at the specified network address
-func Dial(addr string) (*Client, error) {
+func Dial(addr string, logger *logger.Logger) (*Client, error) {
 	s, err := net.ResolveUDPAddr("udp", addr)
 	if err != nil {
-		log.Fatal("error resolving udp address: ", err)
+		panic(fmt.Sprintf("error resolving udp address: %v", err))
 	}
 	conn, err := net.DialUDP("udp", nil, s)
 	if err != nil {
 		return nil, err
 	}
-	client := NewClient(conn)
+	client := NewClient(conn, logger)
 	// close the connection if client is nil
 	defer func() {
 		if client == nil {
@@ -215,12 +211,10 @@ func (client *Client) send(seq uint64, call *Call) {
 	}
 
 	call.Attempts.Add(1)
+
 	// simulate packet loss
-	r := rand.Intn(100)
-	if r < ClientSideNetworkPacketLossProbability {
-		if LogInfo {
-			log.Printf("rpc client: packet seq %d is sent but lost.", header.Seq)
-		}
+	if randomNumberGenerator.Intn(100) < ClientSideNetworkPacketLossProbability {
+		client.logger.Printf("[INFO] rpc client: packet seq %d is sent but lost.", header.Seq)
 		return
 	}
 
@@ -244,7 +238,7 @@ func (client *Client) Go(serviceMethod string, args, reply interface{}, done cha
 	if done == nil {
 		done = make(chan *Call, 10)
 	} else if cap(done) == 0 {
-		log.Panic("rpc client: done channel is unbuffered")
+		panic("rpc client: done channel is unbuffered")
 	}
 	call := &Call{
 		ServiceMethod:    serviceMethod,

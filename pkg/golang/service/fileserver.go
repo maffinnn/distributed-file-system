@@ -138,7 +138,7 @@ func (fs *FileServer) Create(req CreateRequest, resp *CreateResponse) error {
 	rootfd := fs.fileIndexTrees[root]
 	pfd := Search(rootfd, parentDir)
 	if pfd == nil {
-		return fmt.Errorf("file server: dir %s does not exist", parentDir)
+		return fmt.Errorf("file server: parent dir %s does not exist", parentDir)
 	}
 	// check if the file exists
 	localPath := filepath.Join(root, req.FilePath)
@@ -152,12 +152,25 @@ func (fs *FileServer) Create(req CreateRequest, resp *CreateResponse) error {
 		fd.LastModified = time.Now().Unix()
 		// add to tree
 		pfd.AddChild(fd)
+		// update the registered client
+		args := &UpdateCallbackPromiseRequest{
+			FilePath:          pfd.Filepath,
+			IsValidOrCanceled: false,
+		}
+		pfd.subscription.Broadcast(req.ClientId, args) // tell everyone who listens on the parent directory that there is a change to the parent directory
 		resp.IsSuccess = true
-		return nil
+	} else {
+		// overwrite the file if it already exists
+		_, err = os.Create(localPath)
+		if err != nil {
+			return fmt.Errorf("file server: create error %v", err)
+		}
 	}
-	return fmt.Errorf("file server: %s already exists", filepath.Base(req.FilePath))
+
+	return nil
 }
 
+// Read operation sends the entire file content to the client
 func (fs *FileServer) Read(req ReadRequest, resp *ReadResponse) error {
 	fs.logger.Printf("INFO [file server] FileServer.Read is called")
 	root, _, err := fs.find(req.FilePath)
@@ -176,6 +189,7 @@ func (fs *FileServer) Read(req ReadRequest, resp *ReadResponse) error {
 	return nil
 }
 
+// Write operation writes the byte data to the specified file
 func (fs *FileServer) Write(req WriteRequest, resp *WriteResponse) error {
 	fs.logger.Printf("INFO [file server] FileServer.Write is called")
 	root, _, err := fs.find(req.FilePath)
@@ -183,6 +197,7 @@ func (fs *FileServer) Write(req WriteRequest, resp *WriteResponse) error {
 		return err
 	}
 	localPath := filepath.Join(root, req.FilePath)
+	// overwrites the original data
 	f, err := os.Create(localPath)
 	if err != nil {
 		return fmt.Errorf("file server: %v", err)
@@ -215,7 +230,7 @@ func NewFileServer(addr string) *FileServer {
 		rpcServer:         rpc.NewServer(logger),
 	}
 	for _, path := range paths {
-		fs.fileIndexTrees[path] = fs.buildTree(path)
+		fs.fileIndexTrees[path] = fs.buildFileIndexTree(path)
 	}
 	if err := fs.rpcServer.Register(fs); err != nil {
 		panic(fmt.Sprintf("rpc register error: %v", err))
@@ -223,7 +238,7 @@ func NewFileServer(addr string) *FileServer {
 	return fs
 }
 
-func (fs *FileServer) buildTree(entry string) *FileDescriptor {
+func (fs *FileServer) buildFileIndexTree(entry string) *FileDescriptor {
 	if entry == "" {
 		panic("no exported directories")
 	}

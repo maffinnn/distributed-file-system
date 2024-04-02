@@ -3,12 +3,10 @@ package service
 import (
 	"bytes"
 	"fmt"
-	"sync"
 	"time"
 )
 
 type Cache struct {
-	mu sync.Mutex
 	cc map[string]*Entry
 }
 
@@ -33,8 +31,6 @@ func (c *Cache) Get(key string) (*Entry, error) {
 	}
 	return c.cc[key], nil
 }
-
-func (c *Cache) Reset(key string) {}
 
 type Entry struct {
 	dirty         bool

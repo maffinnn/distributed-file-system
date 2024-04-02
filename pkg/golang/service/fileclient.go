@@ -191,15 +191,22 @@ func (fc *FileClient) Create(localPath string) (*FileDescriptor, error) {
 	}
 	v := fc.volumes[mountPoint]
 	filepathSuffix := strings.TrimPrefix(localPath, mountPoint)
-	args := &CreateRequest{FilePath: fp.Join(v.root.Filepath, filepathSuffix)}
-	var reply CreateResponse
-	if err := fc.rpcClient.Call("FileServer.Create", args, &reply); err != nil {
-		return nil, fmt.Errorf("[file client %s]: call FileServer.Create error: %v", fc.id, err)
-	}
+	fd := Search(v.root, filepathSuffix)
+	// create a file descriptor only when the file does not exist
+	if fd == nil {
+		args := &CreateRequest{FilePath: fp.Join(v.root.Filepath, filepathSuffix), ClientId: fc.id}
+		var reply CreateResponse
+		if err := fc.rpcClient.Call("FileServer.Create", args, &reply); err != nil {
+			return nil, fmt.Errorf("[file client %s]: call FileServer.Create error: %v", fc.id, err)
+		}
 
-	fd := NewFileDescriptor(false, fp.Join(v.root.Filepath, filepathSuffix), 0)
-	fd.LastModified = reply.LastModified
-	AddToTree(v.root, fd)
+		fd := NewFileDescriptor(false, fp.Join(v.root.Filepath, filepathSuffix), 0)
+		fd.LastModified = reply.LastModified
+		AddToTree(v.root, fd)
+		return fd, nil
+	} else {
+		fc.cache.Set(fd.Filepath, []byte{})
+	}
 	return fd, nil
 }
 
@@ -225,6 +232,13 @@ func (fc *FileClient) Open(localPath string) (*FileDescriptor, error) {
 	if fd == nil {
 		return nil, fmt.Errorf("unable to find file %s", localPath)
 	}
+	// always read the whole file from the server
+	args := &ReadRequest{FilePath: fd.Filepath}
+	var reply ReadResponse
+	if err := fc.rpcClient.Call("FileServer.Read", args, &reply); err != nil {
+		return nil, fmt.Errorf("call FileServer.Read error: %v", err)
+	}
+	fc.cache.Set(fd.Filepath, reply.Data)
 	if v.fstype == AndrewFileSystemType {
 		fd.CallbackPromise = NewCallbackPromise()
 	}
@@ -253,6 +267,7 @@ func (fc *FileClient) ReadAt(fd *FileDescriptor, offset, n int) ([]byte, error) 
 		fc.cache.Set(fd.Filepath, reply.Data)
 	}
 	cached, _ := fc.cache.Get(fd.Filepath)
+
 	if offset > cached.Len() {
 		return nil, fmt.Errorf("invalid read: offset exceeds the file length")
 	}
@@ -294,7 +309,7 @@ func (fc *FileClient) Read(fd *FileDescriptor, n int) ([]byte, error) {
 }
 
 // user facing method
-// nonidempotent write operation at the given file descriptor location
+// Nonidempotent write operation at the given file descriptor location
 func (fc *FileClient) Write(fd *FileDescriptor, offset int, data []byte) (int, error) {
 	if fd == nil {
 		return 0, fmt.Errorf("invalid write operation, filedescriptor is null")
@@ -327,7 +342,6 @@ func (fc *FileClient) Write(fd *FileDescriptor, offset int, data []byte) (int, e
 	}
 	cached.Write(copy.Bytes()[offset:])
 	cached.dirty = true
-
 	if v, _, err := fc.find(fd.Filepath); err == nil {
 		if v.fstype == SunNetworkFileSystemType {
 			// evict cache to server as soon as possible
@@ -345,7 +359,7 @@ func (fc *FileClient) Write(fd *FileDescriptor, offset int, data []byte) (int, e
 }
 
 // user facing method
-// close the file
+// close the file descriptor
 func (fc *FileClient) Close(fd *FileDescriptor) {
 	if fd == nil {
 		return
@@ -359,6 +373,13 @@ func (fc *FileClient) Close(fd *FileDescriptor) {
 	}
 	if !cached.dirty {
 		return
+	}
+	// find the volume mounting type
+	// if the mounting type is NFS, we donot need to update the server
+	if v, _, err := fc.find(fd.Filepath); err == nil {
+		if v.fstype == SunNetworkFileSystemType {
+			return
+		}
 	}
 	// evict cache to server
 	args := &WriteRequest{ClientId: fc.id, FilePath: fd.Filepath, Data: cached.Bytes()}
@@ -401,7 +422,7 @@ func (fc *FileClient) UpdateCallbackPromise(req UpdateCallbackPromiseRequest, re
 		return nil
 	}
 	fd.CallbackPromise.Set(req.IsValidOrCanceled)
-	fmt.Printf("INFO [file client %s]: content in %s has updated\n", fc.id, req.FilePath)
+	fc.logger.Printf("INFO [file client %s]: content in %s has updated\n", fc.id, req.FilePath)
 	return nil
 }
 

@@ -1,0 +1,2 @@
+2024/04/02 23:25:49 fileclient.go:64: INFO [file client 1]: listening on [::]:8081
+2024/04/02 23:25:49 fileclient.go:79: INFO [file client 1]: etc/exports/mockdir1 is mounted at 1

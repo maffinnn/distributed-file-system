@@ -1,5 +1,0 @@
-2024/04/03 21:28:25 fileserver.go:279: INFO [file server]: listening on [::]:8080
-2024/04/03 21:28:26 fileserver.go:128: INFO [file server] FileServer.Create is called
-2024/04/03 21:28:26 fileserver.go:175: INFO [file server] FileServer.Read is called
-2024/04/03 21:28:26 fileserver.go:194: INFO [file server] FileServer.Write is called
-2024/04/03 21:28:26 fileserver.go:194: INFO [file server] FileServer.Write is called

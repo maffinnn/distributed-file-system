@@ -11,7 +11,7 @@ import (
 var serverAddr string = ":8080"
 var timeFormat string = "2006-01-02 15:04:05"
 
-func TestCreateService() {
+func SimpleTest() {
 	rpc.FilterDuplicatedRequest = false
 	rpc.ServerSideNetworkPacketLossProbability = 0
 	rpc.ClientSideNetworkPacketLossProbability = 0
@@ -24,8 +24,8 @@ func TestCreateService() {
 
 	c1 := service.NewFileClient("1", ":8081", serverAddr)
 	go c1.Run()
-	c1.Mount("etc/exports/mockdir1", "1", service.SunNetworkFileSystemType)
 
+	c1.Mount("etc/exports/mockdir1", "1", service.SunNetworkFileSystemType)
 	fd, err := c1.Create("1/subdir1/testcreate1.txt")
 	if err != nil {
 		fmt.Printf("create error %v", err)
@@ -39,12 +39,28 @@ func TestCreateService() {
 		return
 	}
 	fmt.Printf("%d bytes written to %s\n", n, "1/subdir1/testcreate1.txt")
+
 	data, err := c1.ReadAt(fd, 0, 1000)
 	if err != nil {
 		fmt.Printf("read error %v", err)
 		return
 	}
 	fmt.Printf("\nReading 1/subdir1/testcreate1.txt...\n\n%s\n\n", string(data))
+
+	writeAt := 5
+	n, err = c1.Write(fd, writeAt, []byte(fmt.Sprintf("test write file at position %d\n", writeAt)))
+	if err != nil {
+		fmt.Printf("write error %v", err)
+		return
+	}
+	fmt.Printf("%d bytes written to %s\n", n, "1/subdir1/testcreate1.txt")
+
+	data, err = c1.ReadAt(fd, writeAt, 1000)
+	if err != nil {
+		fmt.Printf("read error %v", err)
+		return
+	}
+	fmt.Printf("\nReading 1/subdir1/testcreate1.txt at position %d...\n\n%s\n\n", writeAt, string(data))
 
 	c1.Close(fd)
 }
@@ -372,5 +388,5 @@ func AtMostOnceNonIdempotentRead() {
 }
 
 func main() {
-	TestCacheConsistencyNFSSenario2()
+	SimpleTest()
 }

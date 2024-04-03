@@ -31,7 +31,6 @@ func SimpleTest() {
 		fmt.Printf("create error %v", err)
 		return
 	}
-	c1.ListAllFiles()
 
 	n, err := c1.Write(fd, 0, []byte("test create file\n"))
 	if err != nil {
@@ -48,7 +47,7 @@ func SimpleTest() {
 	fmt.Printf("\nReading 1/subdir1/testcreate1.txt...\n\n%s\n\n", string(data))
 
 	writeAt := 5
-	n, err = c1.Write(fd, writeAt, []byte(fmt.Sprintf("test write file at position %d\n", writeAt)))
+	n, err = c1.Write(fd, writeAt, []byte(fmt.Sprintf("test write file at position %d", writeAt)))
 	if err != nil {
 		fmt.Printf("write error %v", err)
 		return

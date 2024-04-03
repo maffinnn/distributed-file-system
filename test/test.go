@@ -20,7 +20,7 @@ func SimpleTest() {
 	server := service.NewFileServer(serverAddr)
 	go server.Run()
 
-	time.Sleep(1 * time.Second)
+	time.Sleep(5 * time.Second)
 
 	c1 := service.NewFileClient("1", ":8081", serverAddr)
 	go c1.Run()
@@ -32,34 +32,42 @@ func SimpleTest() {
 		return
 	}
 
-	n, err := c1.Write(fd, 0, []byte("test create file\n"))
+	time.Sleep(5 * time.Second)
+	n, err := c1.Write(fd, 0, []byte("test create file\nEOF"))
 	if err != nil {
 		fmt.Printf("write error %v", err)
 		return
 	}
 	fmt.Printf("%d bytes written to %s\n", n, "1/subdir1/testcreate1.txt")
 
+	time.Sleep(5 * time.Second)
+	fmt.Printf("\nReading 1/subdir1/testcreate1.txt...\n")
 	data, err := c1.ReadAt(fd, 0, 1000)
 	if err != nil {
 		fmt.Printf("read error %v", err)
 		return
 	}
-	fmt.Printf("\nReading 1/subdir1/testcreate1.txt...\n\n%s\n\n", string(data))
+	fmt.Printf("\n%s\n\n", string(data))
+
+	time.Sleep(5 * time.Second)
 
 	writeAt := 5
-	n, err = c1.Write(fd, writeAt, []byte(fmt.Sprintf("test write file at position %d", writeAt)))
+	n, err = c1.Write(fd, writeAt, []byte(fmt.Sprintf("test write file at position %d[whitespace]", writeAt)))
 	if err != nil {
 		fmt.Printf("write error %v", err)
 		return
 	}
 	fmt.Printf("%d bytes written to %s\n", n, "1/subdir1/testcreate1.txt")
 
+	time.Sleep(5 * time.Second)
+
+	fmt.Printf("\nReading 1/subdir1/testcreate1.txt at position %d...\n", writeAt)
 	data, err = c1.ReadAt(fd, writeAt, 1000)
 	if err != nil {
 		fmt.Printf("read error %v", err)
 		return
 	}
-	fmt.Printf("\nReading 1/subdir1/testcreate1.txt at position %d...\n\n%s\n\n", writeAt, string(data))
+	fmt.Printf("\n%s\n\n", string(data))
 
 	c1.Close(fd)
 }
@@ -73,13 +81,19 @@ func senario1(c1, c2 *service.FileClient) {
 		return
 	}
 
+	time.Sleep(2 * time.Second)
+
+	// client 1 reads the file
+	fmt.Printf("\nReading 1/testfile3.txt...\n")
 	data, err := c1.ReadAt(fdC1, 0, 1000) // read all the content
 	if err != nil {
 		fmt.Printf("%+v", err)
 		return
 	}
-	fmt.Printf("\nReading 1/testfile3.txt...\n\n%s\n\n", string(data))
+	fmt.Printf("\n%s\n\n", string(data))
 	c1.Close(fdC1)
+
+	time.Sleep(2 * time.Second)
 
 	// client 2 opens the file
 	fdC2, err = c2.Open("2/testfile3.txt")
@@ -87,25 +101,36 @@ func senario1(c1, c2 *service.FileClient) {
 		fmt.Printf("%+v", err)
 		return
 	}
+
+	time.Sleep(2 * time.Second)
+
 	// client 2 updates the file
+	fmt.Printf("\nReading 2/testfile3.txt...\n")
 	data, err = c2.ReadAt(fdC2, 0, 1000)
 	if err != nil {
 		fmt.Printf("%+v", err)
 		return
 	}
-	fmt.Printf("\nReading 2/testfile3.txt...\n\n%s\n\n", string(data))
+	fmt.Printf("\n%s\n\n", string(data))
+
+	time.Sleep(2 * time.Second)
+
 	n, err := c2.Write(fdC2, 0, []byte(fmt.Sprintf("write to file at %s by client 2\n", time.Now().Format(timeFormat))))
 	if err != nil {
 		fmt.Printf("%+v", err)
 		return
 	}
 	fmt.Printf("\n%d bytes are written to %s\n", n, "2/testfile3.txt")
+
+	time.Sleep(2 * time.Second)
+
+	fmt.Printf("\nReading 2/testfile3.txt...\n")
 	data, err = c2.ReadAt(fdC2, 0, 1000)
 	if err != nil {
 		fmt.Printf("%+v", err)
 		return
 	}
-	fmt.Printf("\nReading 2/testfile3.txt...\n\n%s\n\n", string(data))
+	fmt.Printf("\n%s\n\n", string(data))
 	c2.Close(fdC2)
 
 	time.Sleep(2 * time.Second)
@@ -115,12 +140,17 @@ func senario1(c1, c2 *service.FileClient) {
 		fmt.Printf("%+v", err)
 		return
 	}
+	time.Sleep(2 * time.Second)
+
+	fmt.Printf("\nReading 1/testfile3.txt...\n")
 	data, err = c1.ReadAt(fdC1, 0, 1000)
 	if err != nil {
 		fmt.Printf("%+v", err)
 		return
 	}
-	fmt.Printf("\nReading 1/testfile3.txt...\n\n%s\n\n", string(data))
+	fmt.Printf("\n%s\n\n", string(data))
+
+	time.Sleep(2 * time.Second)
 
 	// client 2 updates the file again
 	n, err = c2.Write(fdC2, 0, []byte(fmt.Sprintf("write to file at %s by client 2 again\n", time.Now().Format(timeFormat))))
@@ -134,12 +164,13 @@ func senario1(c1, c2 *service.FileClient) {
 	time.Sleep(2 * time.Second)
 
 	// client 1 reads the file
+	fmt.Printf("\nReading 1/testfile3.txt...\n")
 	data, err = c1.ReadAt(fdC1, 0, 1000)
 	if err != nil {
 		fmt.Printf("%+v", err)
 		return
 	}
-	fmt.Printf("\nReading 1/testfile3.txt...\n\n%s\n\n", string(data))
+	fmt.Printf("\n%s\n\n", string(data))
 	c1.Close(fdC1)
 }
 
@@ -151,19 +182,27 @@ func senario2(c1, c2 *service.FileClient) {
 		fmt.Printf("%+v", err)
 		return
 	}
+
+	time.Sleep(2 * time.Second)
 	// client 2 opens the file
 	fdC2, err = c2.Open("2/testfile2.txt")
 	if err != nil {
 		fmt.Printf("%+v", err)
 		return
 	}
+
+	time.Sleep(2 * time.Second)
+
 	// client 1 reads
+	fmt.Printf("\nReading 1/testfile2.txt...\n")
 	data, err := c1.ReadAt(fdC1, 0, 1000)
 	if err != nil {
 		fmt.Printf("%+v", err)
 		return
 	}
-	fmt.Printf("\nReading 1/testfile2.txt...\n\n%s\n\n", string(data))
+	fmt.Printf("\n%s\n\n", string(data))
+
+	time.Sleep(2 * time.Second)
 
 	// client 2 updates the file and close
 	n, err := c2.Write(fdC2, 0, []byte(fmt.Sprintf("write to file at %s by client 2\n", time.Now().Format(timeFormat))))
@@ -184,13 +223,15 @@ func senario2(c1, c2 *service.FileClient) {
 	}
 	fmt.Printf("\n%d bytes are written to %s\n", n, "1/testfile2.txt")
 	time.Sleep(2 * time.Second)
+
 	// client 1 reads the file
+	fmt.Printf("\nReading 1/testfile2.txt...\n")
 	data, err = c1.ReadAt(fdC1, 0, 1000)
 	if err != nil {
 		fmt.Printf("%+v", err)
 		return
 	}
-	fmt.Printf("\nReading 1/testfile2.txt...\n\n%s\n\n", string(data))
+	fmt.Printf("\n%s\n\n", string(data))
 	c1.Close(fdC1)
 }
 
@@ -344,7 +385,7 @@ func performNonIdempotentRead() {
 	// }
 	// fmt.Printf("\033[33;1mExpected read file content: %s\n\033[0m", string(expected))
 
-	time.Sleep(3 * time.Second)
+	time.Sleep(2 * time.Second)
 	actual, err := c1.Read(fd, 50)
 	if err != nil {
 		fmt.Printf("read testidempotent.txt error: %v\n", err)

@@ -194,7 +194,7 @@ func (server *Server) sendResponse(conn *net.UDPConn, addr *net.UDPAddr, h *Head
 
 	// simulate packet loss
 	if randomNumberGenerator.Intn(100) < ServerSideNetworkPacketLossProbability {
-		server.logger.Printf("[INFO] rpc server: packet seq %d is sent but lost.", h.Seq)
+		server.logger.Printf("[INFO] rpc server: packet %s is sent but lost.", fmt.Sprintf("%s-%d", addr.String(), h.Seq))
 		return
 	}
 

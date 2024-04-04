@@ -82,7 +82,7 @@ func (fc *FileClient) Mount(src, target string, fstype FileSystemType) error {
 		fc.mountRecursive(root, cp, fstype)
 	}
 	fc.volumes[target] = NewVolume(root, fstype)
-	fc.ListFiles(target)
+
 	// NFS requires polling at the client side
 	if fstype == SunNetworkFileSystemType {
 		go fc.poll()

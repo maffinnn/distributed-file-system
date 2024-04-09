@@ -12,14 +12,13 @@ var serverAddr string = ":8080"
 var timeFormat string = "2006-01-02 15:04:05"
 
 func SimpleTest() {
-	rpc.FilterDuplicatedRequest = false
-	rpc.ServerSideNetworkPacketLossProbability = 0
+	// rpc.FilterDuplicatedRequest = false
+	// rpc.ServerSideNetworkPacketLossProbability = 0
 	rpc.ClientSideNetworkPacketLossProbability = 0
 	rpc.Timeout = 100 * time.Millisecond
 
-	server := service.NewFileServer(serverAddr)
-	go server.Run()
-
+	// server := service.NewFileServer(serverAddr)
+	// go server.Run()
 	time.Sleep(5 * time.Second)
 
 	c1 := service.NewFileClient("1", ":8081", serverAddr)
@@ -28,7 +27,7 @@ func SimpleTest() {
 	src := "etc/exports/mockdir1"
 	target := "1"
 	fmt.Printf("Mounting directory from server directory %s to local directory %s...\n", src, target)
-	c1.Mount(src, target, service.SunNetworkFileSystemType)
+	c1.Mount(src, target, service.AndrewFileSystemType)
 
 	c1.ListFiles(target)
 
@@ -59,7 +58,7 @@ func SimpleTest() {
 		fmt.Printf("read error %v", err)
 		return
 	}
-	fmt.Printf("%s\n\n", string(data))
+	fmt.Printf("%s\n", string(data))
 
 	time.Sleep(5 * time.Second)
 
@@ -80,7 +79,7 @@ func SimpleTest() {
 		fmt.Printf("read error %v", err)
 		return
 	}
-	fmt.Printf("%s\n\n", string(data))
+	fmt.Printf("%s\n", string(data))
 	c1.Close(fd)
 }
 
@@ -103,7 +102,7 @@ func senario1(c1, c2 *service.FileClient) {
 		fmt.Printf("%+v", err)
 		return
 	}
-	fmt.Printf("%s\n\n", string(data))
+	fmt.Printf("%s\n", string(data))
 	c1.Close(fdC1)
 	fmt.Printf("[file client 1] Close session on file 1/testfile3.txt\n")
 
@@ -282,13 +281,13 @@ func senario2(c1, c2 *service.FileClient) {
 }
 
 func TestCacheConsistencyAFSSenario1() {
-	rpc.FilterDuplicatedRequest = false
-	rpc.ServerSideNetworkPacketLossProbability = 0
+	// rpc.FilterDuplicatedRequest = false
+	// rpc.ServerSideNetworkPacketLossProbability = 0
 	rpc.ClientSideNetworkPacketLossProbability = 0
 	rpc.Timeout = 100 * time.Millisecond
 
-	server := service.NewFileServer(serverAddr)
-	go server.Run()
+	// server := service.NewFileServer(serverAddr)
+	// go server.Run()
 
 	time.Sleep(1 * time.Second)
 
@@ -313,13 +312,13 @@ func TestCacheConsistencyAFSSenario1() {
 }
 
 func TestCacheConsistencyAFSSenario2() {
-	rpc.FilterDuplicatedRequest = false
-	rpc.ServerSideNetworkPacketLossProbability = 0
+	// rpc.FilterDuplicatedRequest = false
+	// rpc.ServerSideNetworkPacketLossProbability = 0
 	rpc.ClientSideNetworkPacketLossProbability = 0
 	rpc.Timeout = 100 * time.Millisecond
 
-	server := service.NewFileServer(serverAddr)
-	go server.Run()
+	// server := service.NewFileServer(serverAddr)
+	// go server.Run()
 
 	time.Sleep(1 * time.Second)
 
@@ -344,15 +343,15 @@ func TestCacheConsistencyAFSSenario2() {
 }
 
 func TestCacheConsistencyNFSSenario1() {
-	rpc.FilterDuplicatedRequest = false
-	rpc.ServerSideNetworkPacketLossProbability = 0
+	// rpc.FilterDuplicatedRequest = false
+	// rpc.ServerSideNetworkPacketLossProbability = 0
 	rpc.ClientSideNetworkPacketLossProbability = 0
 	rpc.Timeout = 100 * time.Millisecond
 
 	service.PollInterval = 100 // in milliseconds
 
-	server := service.NewFileServer(serverAddr)
-	go server.Run()
+	// server := service.NewFileServer(serverAddr)
+	// go server.Run()
 
 	time.Sleep(1 * time.Second)
 
@@ -376,14 +375,14 @@ func TestCacheConsistencyNFSSenario1() {
 }
 
 func TestCacheConsistencyNFSSenario2() {
-	rpc.FilterDuplicatedRequest = false
-	rpc.ServerSideNetworkPacketLossProbability = 0
+	// rpc.FilterDuplicatedRequest = false
+	// rpc.ServerSideNetworkPacketLossProbability = 0
 	rpc.ClientSideNetworkPacketLossProbability = 0
 	rpc.Timeout = 100 * time.Millisecond
 	service.PollInterval = 100 // in milliseconds
 
-	server := service.NewFileServer(serverAddr)
-	go server.Run()
+	// server := service.NewFileServer(serverAddr)
+	// go server.Run()
 
 	time.Sleep(2 * time.Second)
 
@@ -408,8 +407,8 @@ func TestCacheConsistencyNFSSenario2() {
 }
 
 func performIdempotentRead() {
-	server := service.NewFileServer(serverAddr)
-	go server.Run()
+	// server := service.NewFileServer(serverAddr)
+	// go server.Run()
 
 	time.Sleep(2 * time.Second) // to make sure server is up
 
@@ -453,8 +452,8 @@ func performIdempotentRead() {
 
 func performNonIdempotentRead() {
 	// init server
-	server := service.NewFileServer(serverAddr)
-	go server.Run()
+	// server := service.NewFileServer(serverAddr)
+	// go server.Run()
 
 	time.Sleep(2 * time.Second) // to make sure server is up
 
@@ -483,18 +482,18 @@ func performNonIdempotentRead() {
 
 	time.Sleep(2 * time.Second)
 	nToRead := 50
-	readAt := 0
-	fmt.Printf("Reading %s for %d bytes at position %d...\n", localPath, nToRead, readAt)
-	time.Sleep(2 * time.Second)
+	// readAt := 0
+	// fmt.Printf("Reading %s for %d bytes at position %d...\n", localPath, nToRead, readAt)
+	// time.Sleep(2 * time.Second)
 
-	expected, err := c1.ReadAt(fd, readAt, nToRead)
-	if err != nil {
-		fmt.Printf("read testidempotent.txt error: %v\n", err)
-		return
-	}
-	fmt.Printf("Expected read file content: \n%s\n", string(expected))
+	// expected, err := c1.ReadAt(fd, readAt, nToRead)
+	// if err != nil {
+	// 	fmt.Printf("read testidempotent.txt error: %v\n", err)
+	// 	return
+	// }
+	// fmt.Printf("Expected read file content: \n%s\n", string(expected))
 
-	time.Sleep(4 * time.Second)
+	// time.Sleep(4 * time.Second)
 
 	actual, err := c1.Read(fd, nToRead)
 	if err != nil {
@@ -505,38 +504,37 @@ func performNonIdempotentRead() {
 }
 
 func AtLeastOnceIdempotentRead() {
-	rpc.FilterDuplicatedRequest = false
-	rpc.ServerSideNetworkPacketLossProbability = 50
+	// rpc.FilterDuplicatedRequest = false
+	// rpc.ServerSideNetworkPacketLossProbability = 50
 	rpc.ClientSideNetworkPacketLossProbability = 50
 	rpc.Timeout = 100 * time.Millisecond
 	performIdempotentRead()
 }
 
 func AtLeastOnceNonIdempotentRead() {
-	// set up
-	rpc.FilterDuplicatedRequest = false
-	rpc.ServerSideNetworkPacketLossProbability = 50
-	rpc.ClientSideNetworkPacketLossProbability = 0
-	rpc.Timeout = 750 * time.Millisecond
+	// rpc.FilterDuplicatedRequest = false
+	// rpc.ServerSideNetworkPacketLossProbability = 50
+	rpc.ClientSideNetworkPacketLossProbability = 50
+	rpc.Timeout = 100 * time.Millisecond
 	performNonIdempotentRead()
 }
 
 func AtMostOnceIdempotentRead() {
-	rpc.FilterDuplicatedRequest = true
-	rpc.ServerSideNetworkPacketLossProbability = 50
+	// rpc.FilterDuplicatedRequest = true
+	// rpc.ServerSideNetworkPacketLossProbability = 50
 	rpc.ClientSideNetworkPacketLossProbability = 50
-	rpc.Timeout = 200 * time.Millisecond
+	rpc.Timeout = 100 * time.Millisecond
 	performIdempotentRead()
 }
 
 func AtMostOnceNonIdempotentRead() {
-	rpc.FilterDuplicatedRequest = true
-	rpc.ServerSideNetworkPacketLossProbability = 50
-	rpc.ClientSideNetworkPacketLossProbability = 0
-	rpc.Timeout = 800 * time.Millisecond
+	// rpc.FilterDuplicatedRequest = true
+	// rpc.ServerSideNetworkPacketLossProbability = 50
+	rpc.ClientSideNetworkPacketLossProbability = 50
+	rpc.Timeout = 100 * time.Millisecond
 	performNonIdempotentRead()
 }
 
 func main() {
-	AtMostOnceNonIdempotentRead()
+	SimpleTest()
 }

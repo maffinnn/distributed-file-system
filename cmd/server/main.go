@@ -11,25 +11,29 @@ import (
 var serverAddr = ":8080"
 
 func main() {
-	s := flag.String("setting", "AtLeastOnceIdempotent", "")
+	s := flag.String("setting", "SimpleTest", "")
 	flag.Parse()
 
 	settings := map[string]config.Config{
-		"AtLeastOnceIdempotent": {
+		"SimpleTest": {
 			FilterDuplicatedRequest:                false,
-			ServerSideNetworkPacketLossProbability: 20,
+			ServerSideNetworkPacketLossProbability: 0,
 		},
-		"AtLeastOnceNonIdempotent": {
+		"AtLeastOnceIdempotentRead": {
 			FilterDuplicatedRequest:                false,
 			ServerSideNetworkPacketLossProbability: 50,
 		},
-		"AtMostOnceIdempotent": {
+		"AtLeastOnceNonIdempotentRead": {
+			FilterDuplicatedRequest:                false,
+			ServerSideNetworkPacketLossProbability: 99,
+		},
+		"AtMostOnceIdempotentRead": {
 			FilterDuplicatedRequest:                true,
-			ServerSideNetworkPacketLossProbability: 10,
+			ServerSideNetworkPacketLossProbability: 50,
 		},
 		"AtMostOnceNonIdempotentRead": {
 			FilterDuplicatedRequest:                true,
-			ServerSideNetworkPacketLossProbability: 50,
+			ServerSideNetworkPacketLossProbability: 99,
 		},
 		"TestCacheConsistency": {
 			FilterDuplicatedRequest:                true,

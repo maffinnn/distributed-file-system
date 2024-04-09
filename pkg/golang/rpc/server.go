@@ -23,6 +23,7 @@ var (
 type Server struct {
 	receiving  sync.Mutex // guard for receiving
 	sending    sync.Mutex // guard for sending
+	mu         sync.Mutex
 	cc         Codec
 	serviceMap sync.Map // to store the registered service
 	processed  sync.Map // processed message store
@@ -97,6 +98,7 @@ func (server *Server) Accept(conn *net.UDPConn) {
 // ServeConn runs the server on a single connection.
 // ServeConn blocks, serving the connection until the client hangs up.
 func (server *Server) ServeConn(conn *net.UDPConn, addr *net.UDPAddr, data []byte) {
+
 	req, err := server.readRequest(data)
 	if err != nil {
 		if req == nil {
@@ -107,6 +109,9 @@ func (server *Server) ServeConn(conn *net.UDPConn, addr *net.UDPAddr, data []byt
 		return
 	}
 
+	server.mu.Lock()
+	defer server.mu.Unlock()
+
 	// log.Printf("rpc server: packet seq %d from %s has been received\n", req.h.Seq)
 	// check for request duplication
 	if FilterDuplicatedRequest {
@@ -114,7 +119,7 @@ func (server *Server) ServeConn(conn *net.UDPConn, addr *net.UDPAddr, data []byt
 		v, ok := server.processed.Load(id)
 		if ok {
 			// exists
-			server.logger.Printf("[INFO] rpc server: duplicated request %d, sending from cached result.\n", req.h.Seq)
+			server.logger.Printf("[INFO] rpc server: duplicated request %s, sending from cached result.\n", id)
 			c := v.(*cachedResponse)
 			server.sendResponse(conn, addr, req.h, c.replyv.Interface())
 			return

@@ -45,6 +45,7 @@ func (fs *FileServer) find(file string) (string, string, error) {
 }
 
 func (fs *FileServer) Mount(req MountRequest, resp *MountResponse) error {
+	fs.logger.Printf("INFO [file server] FileServer.Mount is called")
 	// every filepath is found through root + path for security
 	rootpath, path, err := fs.find(req.FilePath)
 	if err != nil {
@@ -76,6 +77,7 @@ func (fs *FileServer) Mount(req MountRequest, resp *MountResponse) error {
 
 // unmount will unsubscribe the requested client from the list
 func (fs *FileServer) Unmount(req UnmountRequest, resp *UnmountResponse) error {
+	fs.logger.Printf("INFO [file server] FileServer.Unmount is called")
 	root, path, err := fs.find(req.FilePath)
 	if err != nil {
 		return fmt.Errorf("file server: %v", err)
@@ -88,6 +90,7 @@ func (fs *FileServer) Unmount(req UnmountRequest, resp *UnmountResponse) error {
 }
 
 func (fs *FileServer) GetAttribute(req GetAttributeRequest, resp *GetAttributeResponse) error {
+	fs.logger.Printf("INFO [file server] FileServer.GetAttribute is called")
 	root, path, err := fs.find(req.FilePath)
 	if err != nil {
 		return fmt.Errorf("file server: %v", err)

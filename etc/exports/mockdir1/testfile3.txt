@@ -1,5 +1,2 @@
-write to file at 2024-04-08 16:56:53 by client 2
-write to file at 2024-04-08 16:54:37 by client 2 again
-write to file at 2024-04-08 16:54:29 by client 2
 Hello
 EOF
